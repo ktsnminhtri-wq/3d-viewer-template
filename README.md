@@ -9,6 +9,8 @@ Website tĩnh toàn màn hình để xem file `model.glb` bằng Google `<model-
 ├── index.html
 ├── styles.css
 ├── app.js
+├── assets/
+│   └── spruit-sunrise-1k-hdr.jpg
 ├── model.glb
 ├── model-original.glb
 ├── package.json
