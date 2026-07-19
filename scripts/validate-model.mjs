@@ -3,9 +3,9 @@ import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import sharp from "sharp";
 
-const ORIGINAL = "./model-original.glb";
-const OPTIMIZED = "./model.glb";
-const REPORT = "./optimization-validation-report.json";
+const ORIGINAL = process.argv[2] ?? "./model-source-backup.glb";
+const OPTIMIZED = process.argv[3] ?? "./model.glb";
+const REPORT = process.argv[4] ?? "./optimization-validation-report.json";
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
@@ -107,9 +107,9 @@ if (before.sceneTriangles !== after.sceneTriangles) {
   failures.push("Rendered scene triangle count changed.");
 }
 
-for (const texture of after.textures.filter((item) => /coudy-brown-leather/i.test(item.name))) {
+for (const texture of after.textures) {
   if (Math.max(texture.width ?? 0, texture.height ?? 0) > 2048) {
-    failures.push(`Leather texture exceeds 2048 px: ${texture.name}`);
+    failures.push(`Texture exceeds 2048 px: ${texture.name}`);
   }
 }
 
@@ -121,8 +121,18 @@ for (const texture of before.textures.filter((item) => item.hasTransparency)) {
   }
 }
 
-if (after.extensionsUsed.some((name) => name !== "EXT_texture_webp")) {
-  failures.push(`Unexpected extension used: ${after.extensionsUsed.join(", ")}`);
+const geometryCompressionExtensions = [
+  "KHR_draco_mesh_compression",
+  "EXT_meshopt_compression",
+  "KHR_mesh_quantization",
+];
+for (const extension of geometryCompressionExtensions) {
+  if (
+    after.extensionsUsed.includes(extension)
+    && !before.extensionsUsed.includes(extension)
+  ) {
+    failures.push(`Unexpected geometry compression extension added: ${extension}`);
+  }
 }
 
 const report = {
@@ -134,7 +144,8 @@ const report = {
     "Scene-rendered triangle count is unchanged.",
     "Stored triangle count decreases only because byte-identical meshes now share definitions.",
     "No Draco, Meshopt, quantization, simplification, or other geometry compression was applied.",
-    "Texture encoding is lossy WebP quality 82; alpha channels remain present where required.",
+    "Color textures converted by the optimizer use WebP quality 82; data textures use lossless WebP.",
+    "Alpha channels remain present where required and output textures do not exceed 2048 px.",
   ],
 };
 
@@ -146,7 +157,9 @@ console.log(JSON.stringify({
   after: { ...after, textures: undefined },
   transparentTexturesBefore: before.textures.filter((texture) => texture.hasTransparency).length,
   transparentTexturesAfter: after.textures.filter((texture) => texture.hasTransparency).length,
-  leatherTexturesAfter: after.textures.filter((texture) => /coudy-brown-leather/i.test(texture.name)),
+  oversizedTexturesAfter: after.textures.filter(
+    (texture) => Math.max(texture.width ?? 0, texture.height ?? 0) > 2048,
+  ),
 }, null, 2));
 
 if (failures.length) process.exitCode = 1;

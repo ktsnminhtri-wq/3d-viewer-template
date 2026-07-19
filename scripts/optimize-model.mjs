@@ -1,34 +1,31 @@
 import { writeFile } from "node:fs/promises";
-import { NodeIO, PropertyType, Verbosity } from "@gltf-transform/core";
+import {
+  Logger,
+  NodeIO,
+  PropertyType,
+} from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import {
+  compressTexture,
   dedup,
   join,
+  listTextureSlots,
   prune,
-  textureCompress,
 } from "@gltf-transform/functions";
 import sharp from "sharp";
 
-const INPUT = "./model-original.glb";
-const OUTPUT = "./model-optimized.glb";
-const REPORT = "./optimization-transform-report.json";
+const INPUT = process.argv[2] ?? "./model-source-backup.glb";
+const OUTPUT = process.argv[3] ?? "./model-optimized.glb";
+const REPORT = process.argv[4] ?? "./optimization-transform-report.json";
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
-io.setLogger({
-  debug: console.debug,
-  info: console.info,
-  warn: console.warn,
-  error: console.error,
-  getVerbosity: () => Verbosity.WARN,
-  setVerbosity: () => {},
-});
+io.setLogger(new Logger(Logger.Verbosity.WARN));
 
 function countPrimitiveTriangles(primitive) {
   const count = primitive.getIndices()?.getCount()
     ?? primitive.getAttribute("POSITION")?.getCount()
     ?? 0;
   const mode = primitive.getMode();
-
   if (mode === 4) return Math.floor(count / 3);
   if (mode === 5 || mode === 6) return Math.max(0, count - 2);
   return 0;
@@ -43,16 +40,13 @@ function collectStats(document) {
   function visitNode(node) {
     const mesh = node.getMesh();
     if (mesh) {
-      sceneTriangles += mesh
-        .listPrimitives()
-        .reduce(
-          (total, primitive) => total + countPrimitiveTriangles(primitive),
-          0,
-        );
+      sceneTriangles += mesh.listPrimitives().reduce(
+        (total, primitive) => total + countPrimitiveTriangles(primitive),
+        0,
+      );
     }
     for (const child of node.listChildren()) visitNode(child);
   }
-
   for (const scene of root.listScenes()) {
     for (const child of scene.listChildren()) visitNode(child);
   }
@@ -77,23 +71,27 @@ function collectStats(document) {
   };
 }
 
+function isDataTexture(texture) {
+  return listTextureSlots(texture).some((slot) => (
+    /normal|occlusion|metallic|roughness|transmission|thickness|specular/i.test(slot)
+  ));
+}
+
 console.info(`Reading ${INPUT}...`);
 const document = await io.read(INPUT);
 const before = collectStats(document);
 console.info("Before transforms:", before);
 
-// Names are intentionally ignored here. Materials that render identically should
-// share one Material object even if the source exporter assigned unique labels.
+// Exporters often create unique names for otherwise identical materials.
 await document.transform(
   dedup({
     keepUniqueNames: false,
     propertyTypes: [PropertyType.MATERIAL],
   }),
 );
-console.info("After material deduplication:", collectStats(document));
 
-// Join only primitives within their existing meshes. This preserves scene nodes,
-// transforms, object names, hierarchy, instancing, and the exact polygon count.
+// Join compatible primitives only within their existing mesh. Object names,
+// transforms, hierarchy, instancing, and rendered triangle count are preserved.
 await document.transform(
   join({
     keepMeshes: true,
@@ -116,28 +114,32 @@ await document.transform(
     ],
   }),
 );
-console.info("After primitive joining and cleanup:", collectStats(document));
 
-// WebP is supported by the current <model-viewer> integration and preserves alpha.
-// Only the two named leather textures are resized; all other texture dimensions
-// remain unchanged. All textures are re-encoded at approximately 82% quality.
+// Avoid generation loss on already-compliant WebP textures. Color textures use
+// quality 82; data textures use lossless WebP. Any image over 2048 px is resized.
+for (const texture of document.getRoot().listTextures()) {
+  const image = texture.getImage();
+  if (!image) continue;
+
+  const mimeType = texture.getMimeType();
+  if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) continue;
+
+  const metadata = await sharp(image).metadata();
+  const oversized = Math.max(metadata.width ?? 0, metadata.height ?? 0) > 2048;
+  const needsWebP = mimeType !== "image/webp";
+  if (!oversized && !needsWebP) continue;
+
+  const dataTexture = isDataTexture(texture);
+  await compressTexture(texture, {
+    encoder: sharp,
+    targetFormat: "webp",
+    effort: 6,
+    ...(oversized ? { resize: [2048, 2048] } : {}),
+    ...(dataTexture ? { lossless: true } : { quality: 82 }),
+  });
+}
+
 await document.transform(
-  textureCompress({
-    encoder: sharp,
-    targetFormat: "webp",
-    quality: 82,
-    effort: 6,
-    resize: [2048, 2048],
-    pattern: /coudy-brown-leather/i,
-  }),
-  textureCompress({
-    encoder: sharp,
-    targetFormat: "webp",
-    quality: 82,
-    effort: 6,
-    formats: /^image\/(jpeg|png)$/,
-    pattern: /^(?!.*coudy-brown-leather).*$/i,
-  }),
   dedup({
     keepUniqueNames: false,
     propertyTypes: [PropertyType.TEXTURE, PropertyType.MATERIAL],
@@ -157,12 +159,12 @@ if (after.sceneTriangles !== before.sceneTriangles) {
   );
 }
 
-console.info("After texture compression:", after);
+console.info("After transforms:", after);
 console.info(`Writing ${OUTPUT}...`);
 await io.write(OUTPUT, document);
 await writeFile(
   REPORT,
-  `${JSON.stringify({ before, after }, null, 2)}\n`,
+  `${JSON.stringify({ input: INPUT, output: OUTPUT, before, after }, null, 2)}\n`,
   "utf8",
 );
-console.info("Optimization transform completed successfully.");
+console.info("Optimization completed successfully without geometry simplification.");

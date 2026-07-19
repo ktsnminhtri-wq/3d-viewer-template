@@ -41,6 +41,26 @@ py -m http.server 8000
 
 Để dừng server, nhấn `Ctrl+C` trong cửa sổ terminal.
 
+## Cập nhật model và deploy tự động
+
+Thay `model.glb` bằng file GLB mới xuất, sau đó chỉ cần chạy:
+
+```bash
+npm run deploy
+```
+
+Quy trình sẽ tự động:
+
+1. Tạo bản sao lưu cục bộ `model-source-backup.glb`.
+2. Phân tích dung lượng, metadata, material, primitive, texture và dữ liệu không dùng.
+3. Tự quyết định có cần tối ưu dựa trên ngưỡng 50/100 MiB và mức lãng phí thực tế.
+4. Giữ nguyên hình học và số tam giác hiển thị, gộp material/primitive tương thích, dọn dữ liệu thừa, chuyển texture phù hợp sang WebP và giới hạn texture ở 2048 px.
+5. Kiểm tra chuẩn glTF, transparency, số tam giác và đường dẫn `index.html` → `./model.glb` bằng static server cục bộ.
+6. Chặn commit nếu bất kỳ file nào vượt 100 MiB hoặc validation thất bại.
+7. Commit và push lên branch `main`, rồi in đường dẫn GitHub Pages.
+
+Không cần Blender, Git LFS hoặc lệnh Git thủ công. File sao lưu nguồn chỉ nằm trên máy và được loại khỏi Git bằng `.gitignore`.
+
 ## Đưa project lên GitHub
 
 ### 1. Tạo repository
@@ -97,6 +117,7 @@ Các gói Node.js chỉ phục vụ việc tái tạo và kiểm tra bản tối
 ```bash
 npm run optimize:model
 npm run validate:model
+npm run deploy
 ```
 
 Lệnh tối ưu luôn đọc `model-original.glb` và ghi bản thử nghiệm thành `model-optimized.glb`; nó không tự ghi đè `model.glb`.
