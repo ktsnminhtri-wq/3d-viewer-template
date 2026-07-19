@@ -1,0 +1,8 @@
+node_modules/
+model-original.glb
+model-optimized.glb
+.agents/
+model-analysis-summary.json
+model-*-analysis.csv
+model-duplicate-meshes.csv
+optimization-*-report.json

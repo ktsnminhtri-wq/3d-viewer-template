@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#e7e7e5" />
+    <meta
+      name="description"
+      content="Trình xem mô hình 3D GLB toàn màn hình, hỗ trợ chuột và cảm ứng."
+    />
+    <title>Trình xem mô hình 3D</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script
+      type="module"
+      src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"
+    ></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <main class="viewer-shell" id="viewerShell">
+      <model-viewer
+        id="modelViewer"
+        src="./model.glb"
+        alt="Mô hình 3D tương tác"
+        camera-controls
+        touch-action="none"
+        camera-orbit="0deg 75deg auto"
+        camera-target="auto auto auto"
+        field-of-view="30deg"
+        min-camera-orbit="auto auto 5%"
+        max-camera-orbit="auto auto 500%"
+        interaction-prompt="none"
+        shadow-intensity="0.7"
+        shadow-softness="0.9"
+        exposure="1"
+      >
+        <div class="loading-panel" id="loadingPanel" slot="poster" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <p>Đang tải mô hình…</p>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Tiến trình tải mô hình"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="progressTrack"
+          >
+            <span id="progressBar"></span>
+          </div>
+          <span class="progress-value" id="progressValue">0%</span>
+        </div>
+      </model-viewer>
+
+      <section class="error-panel" id="errorPanel" role="alert" hidden>
+        <strong>Không thể tải mô hình 3D</strong>
+        <p>
+          Hãy kiểm tra file <code>model.glb</code> nằm cùng thư mục với
+          <code>index.html</code>, rồi tải lại trang.
+        </p>
+        <button class="retry-button" id="retryButton" type="button">Tải lại</button>
+      </section>
+
+      <div class="bottom-ui">
+        <div class="controls" aria-label="Điều khiển mô hình">
+          <button id="resetButton" type="button" title="Đặt lại góc nhìn">
+            <span class="button-icon" aria-hidden="true">↺</span>
+            <span>Đặt lại</span>
+          </button>
+          <button
+            id="rotateButton"
+            type="button"
+            aria-pressed="false"
+            title="Bật tự động xoay"
+          >
+            <span class="button-icon" aria-hidden="true">◌</span>
+            <span id="rotateLabel">Tự xoay</span>
+          </button>
+          <button id="fullscreenButton" type="button" title="Bật toàn màn hình">
+            <span class="button-icon fullscreen-icon" aria-hidden="true">⛶</span>
+            <span id="fullscreenLabel">Toàn màn hình</span>
+          </button>
+        </div>
+        <p class="hint">Kéo để xoay · Cuộn hoặc chụm để zoom</p>
+      </div>
+    </main>
+  </body>
+</html>

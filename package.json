@@ -1,0 +1,21 @@
+{
+  "name": "3d-viewer-template",
+  "version": "1.0.0",
+  "description": "Website tĩnh toàn màn hình để xem file `model.glb` bằng Google `<model-viewer>`. Trang hỗ trợ xoay, zoom, cảm ứng, đặt lại góc nhìn, tự động xoay và toàn màn hình.",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "optimize:model": "node --max-old-space-size=4096 ./scripts/optimize-model.mjs",
+    "validate:model": "node --max-old-space-size=4096 ./scripts/validate-model.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.4.1",
+    "@gltf-transform/core": "^4.4.1",
+    "@gltf-transform/extensions": "^4.4.1",
+    "@gltf-transform/functions": "^4.4.1",
+    "sharp": "^0.35.3"
+  }
+}
