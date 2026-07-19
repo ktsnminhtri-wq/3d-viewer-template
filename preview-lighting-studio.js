@@ -50,10 +50,6 @@ studio.innerHTML = `
     <span class="lighting-studio__label"><span>Shadow softness</span><output data-output="shadowSoftness"></output></span>
     <input data-lighting="shadowSoftness" type="range" min="0" max="2" step="0.01" />
   </label>
-  <label class="lighting-studio__field">
-    <span class="lighting-studio__label"><span>Environment rotation</span><output data-output="rotation"></output></span>
-    <input data-lighting="rotation" type="range" min="0" max="360" step="1" />
-  </label>
   <div class="lighting-studio__actions">
     <button type="button" data-action="reset">Reset</button>
     <button type="button" class="lighting-studio__save" data-action="save">Save Lighting</button>
@@ -76,7 +72,6 @@ function displayValues() {
   outputs.exposure.textContent = Number(config.exposure).toFixed(2);
   outputs.shadowIntensity.textContent = Number(config.shadowIntensity).toFixed(2);
   outputs.shadowSoftness.textContent = Number(config.shadowSoftness).toFixed(2);
-  outputs.rotation.textContent = `${Math.round(config.rotation)}°`;
 }
 
 function syncControls() {
