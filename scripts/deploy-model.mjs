@@ -19,9 +19,15 @@ import {
   optimizationReasons,
   printableSummary,
 } from "./glb-utils.mjs";
+import {
+  bakeLightingIntoViewer,
+  readLightingConfig,
+  writeLightingConfig,
+} from "./lighting-config.mjs";
 
 const ROOT = process.cwd();
 const MODEL = path.join(ROOT, "model.glb");
+const INCOMING_MODEL = path.join(ROOT, "model-new.glb");
 const BACKUP = path.join(ROOT, "model-source-backup.glb");
 const CANDIDATE = path.join(ROOT, "model-optimized.glb");
 const RECEIPT = path.join(ROOT, ".preview-validation.json");
@@ -31,7 +37,15 @@ const GLTF_CLI = path.join(ROOT, "node_modules", "@gltf-transform", "cli", "bin"
 const PREVIEW_MODE = process.argv.includes("--preview");
 const NO_OPEN = process.argv.includes("--no-open");
 const PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 8000);
-const CORE_VISUAL_FILES = ["model.glb", "index.html", "styles.css", "app.js"];
+const CORE_VISUAL_FILES = [
+  "model.glb",
+  "index.html",
+  "styles.css",
+  "app.js",
+  "lighting-config.json",
+  "preview-lighting-studio.css",
+  "preview-lighting-studio.js",
+];
 
 let beforeAnalysis;
 let afterAnalysis;
@@ -84,6 +98,15 @@ async function assertBackupIsIgnored() {
   }
 }
 
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function validateSpec(filePath) {
   const result = await run(process.execPath, [GLTF_CLI, "validate", filePath], {
     capture: true,
@@ -104,6 +127,9 @@ async function validateWebsite() {
   const indexHTML = await readFile(path.join(ROOT, "index.html"), "utf8");
   if (!/src=["']\.\/model\.glb["']/.test(indexHTML)) {
     throw new Error('index.html must load the model from src="./model.glb".');
+  }
+  if (/lightingStudio|preview-lighting-studio/i.test(indexHTML)) {
+    throw new Error("The production index.html must not contain Preview Lighting Studio.");
   }
 
   const server = createStaticServer();
@@ -201,6 +227,7 @@ function contentType(filePath) {
     ".html": "text/html; charset=utf-8",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".json": "application/json; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
     ".png": "image/png",
     ".webp": "image/webp",
@@ -216,10 +243,29 @@ function safeLocalPath(urlPath) {
   return resolved.startsWith(`${path.resolve(ROOT)}${path.sep}`) ? resolved : null;
 }
 
-function createStaticServer({ liveReloadClients } = {}) {
+async function readJSONBody(request, maxBytes = 8192) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.byteLength;
+    if (bytes > maxBytes) throw new Error("Request body is too large.");
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function createStaticServer({ liveReloadClients, onLightingSaved } = {}) {
   return createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url, "http://127.0.0.1").pathname;
+      if (pathname === "/__preview_lighting" && request.method === "POST" && onLightingSaved) {
+        const config = await onLightingSaved(await readJSONBody(request));
+        response.writeHead(200, {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8",
+        }).end(JSON.stringify(config));
+        return;
+      }
       if (pathname === "/__preview_events" && liveReloadClients) {
         response.writeHead(200, {
           "Cache-Control": "no-cache",
@@ -248,8 +294,14 @@ function createStaticServer({ liveReloadClients } = {}) {
         response.writeHead(200).end();
       } else if (path.basename(filePath).toLowerCase() === "index.html" && liveReloadClients) {
         const html = await readFile(filePath, "utf8");
-        const script = '<script>new EventSource("./__preview_events").onmessage=()=>location.reload();</script>';
-        const injected = html.includes("</body>") ? html.replace("</body>", `${script}</body>`) : `${html}${script}`;
+        const previewAssets = [
+          '<link rel="stylesheet" href="./preview-lighting-studio.css" data-preview-only>',
+          '<script type="module" src="./preview-lighting-studio.js" data-preview-only></script>',
+          '<script data-preview-only>new EventSource("./__preview_events").onmessage=()=>location.reload();</script>',
+        ].join("");
+        const injected = html.includes("</body>")
+          ? html.replace("</body>", `${previewAssets}</body>`)
+          : `${html}${previewAssets}`;
         response.writeHead(200).end(injected);
       } else {
         response.setHeader("Content-Length", String(fileStats.size));
@@ -325,17 +377,24 @@ function printLargestContributors(analysis) {
 
 async function prepareAndValidateModel() {
   validationResult = "NOT RUN";
-  await access(MODEL);
   await assertBackupIsIgnored();
-  console.info(`Found model.glb (${formatMiB((await stat(MODEL)).size)}).`);
-  await copyFile(MODEL, BACKUP);
-  console.info("Created local backup: model-source-backup.glb");
+  const hasIncomingModel = await fileExists(INCOMING_MODEL);
+  const sourceModel = hasIncomingModel ? INCOMING_MODEL : MODEL;
+  if (!hasIncomingModel) await access(MODEL);
+
+  const sourceName = hasIncomingModel ? "model-new.glb" : "model.glb";
+  console.info(`Found ${sourceName} (${formatMiB((await stat(sourceModel)).size)}).`);
+  await copyFile(sourceModel, BACKUP);
+  console.info(`Created model-source-backup.glb from ${sourceName}.`);
 
   beforeAnalysis = await analyzeGLB(BACKUP);
   console.info("Source analysis:", printableSummary(beforeAnalysis));
   const reasons = optimizationReasons(beforeAnalysis);
   let shouldOptimize;
-  if (beforeAnalysis.totalBytes > GITHUB_FILE_LIMIT) {
+  if (hasIncomingModel) {
+    shouldOptimize = true;
+    console.info("New SketchUp export detected; optimization is mandatory.");
+  } else if (beforeAnalysis.totalBytes > GITHUB_FILE_LIMIT) {
     shouldOptimize = true;
     console.info("Model is over 100 MiB; optimization is mandatory.");
   } else if (beforeAnalysis.totalBytes >= 50 * MIB) {
@@ -373,6 +432,10 @@ async function prepareAndValidateModel() {
     throw new Error("Rendered triangle count changed.");
   }
   await validateWebsite();
+  if (hasIncomingModel) {
+    await rm(INCOMING_MODEL);
+    console.info("Optimization and validation succeeded; deleted model-new.glb.");
+  }
   validationResult = "PASS";
   return { beforeAnalysis, afterAnalysis };
 }
@@ -385,7 +448,7 @@ async function commitAndPush(originalBytes, finalBytes) {
   await git(["add", "-A"]);
   const stagedOutput = (await git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"], { capture: true })).stdout.trim();
   const stagedFiles = stagedOutput ? stagedOutput.split(/\r?\n/) : [];
-  const forbidden = /^(?:node_modules\/|model-original\.glb$|model-source-backup\.glb$|model-optimized\.glb$|\.preview-validation\.json$)/i;
+  const forbidden = /^(?:node_modules\/|model-original\.glb$|model-new\.glb$|model-source-backup\.glb$|model-optimized\.glb$|\.preview-validation\.json$)/i;
   for (const relativePath of stagedFiles) {
     if (forbidden.test(relativePath)) throw new Error(`Forbidden deployment file was staged: ${relativePath}`);
     try {
@@ -423,16 +486,36 @@ function printSummary(title) {
 function isWatchedFile(filename) {
   if (!filename) return false;
   const relative = String(filename).replaceAll("\\", "/").replace(/^\.\//, "");
-  return CORE_VISUAL_FILES.includes(relative) || relative.startsWith("assets/");
+  return relative === "model-new.glb"
+    || CORE_VISUAL_FILES.includes(relative)
+    || relative.startsWith("assets/");
 }
 
 async function previewMain() {
+  const initialLighting = await readLightingConfig(ROOT, { create: true });
+  await bakeLightingIntoViewer(ROOT, initialLighting);
   await prepareAndValidateModel();
   let receipt = await writePreviewReceipt();
   printSummary("Preview validation summary");
 
   const clients = new Set();
-  const server = createStaticServer({ liveReloadClients: clients });
+  let suppressWatch = false;
+  const server = createStaticServer({
+    liveReloadClients: clients,
+    onLightingSaved: async (value) => {
+      suppressWatch = true;
+      try {
+        const config = await writeLightingConfig(ROOT, value);
+        await bakeLightingIntoViewer(ROOT, config);
+        await validateWebsite();
+        receipt = await writePreviewReceipt();
+        console.info("Lighting settings saved and production viewer updated.");
+        return config;
+      } finally {
+        setTimeout(() => { suppressWatch = false; }, 1200);
+      }
+    },
+  });
   await listen(server, PREVIEW_PORT, "127.0.0.1");
   const url = `http://localhost:${PREVIEW_PORT}`;
   console.info(`\nPreview URL: ${url}`);
@@ -450,8 +533,9 @@ async function previewMain() {
     rebuilding = true;
     try {
       const current = hashesFingerprint(await visualHashes());
-      if (current === receipt.fingerprint) return;
+      if (current === receipt.fingerprint && !(await fileExists(INCOMING_MODEL))) return;
       console.info("\nVisual file change detected; rebuilding preview...");
+      await bakeLightingIntoViewer(ROOT, await readLightingConfig(ROOT, { create: true }));
       await prepareAndValidateModel();
       receipt = await writePreviewReceipt();
       for (const client of clients) client.write("data: reload\n\n");
@@ -470,7 +554,7 @@ async function previewMain() {
     }
   };
   const watcher = watchFiles(ROOT, { recursive: true }, (_event, filename) => {
-    if (!isWatchedFile(filename)) return;
+    if (suppressWatch || !isWatchedFile(filename)) return;
     clearTimeout(timer);
     timer = setTimeout(() => void rebuild(), 750);
   });
@@ -487,6 +571,9 @@ async function previewMain() {
 }
 
 async function deployMain() {
+  const lighting = await readLightingConfig(ROOT, { create: true });
+  await bakeLightingIntoViewer(ROOT, lighting);
+  console.info("Production lighting baked from lighting-config.json.");
   await verifyPreviewReceipt();
   await prepareAndValidateModel();
   await verifyPreviewReceipt();

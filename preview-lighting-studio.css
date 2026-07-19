@@ -1,0 +1,138 @@
+.lighting-studio {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 10000;
+  width: min(320px, calc(100vw - 28px));
+  padding: 16px;
+  border: 1px solid rgb(255 255 255 / 68%);
+  border-radius: 16px;
+  background: rgb(31 33 31 / 88%);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 24%);
+  color: #f5f5f1;
+  font: 500 12px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.lighting-studio__header,
+.lighting-studio__label,
+.lighting-studio__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lighting-studio__header {
+  margin-bottom: 14px;
+}
+
+.lighting-studio__header strong {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.lighting-studio__badge {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: #bfc2bc;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lighting-studio__field {
+  display: grid;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.lighting-studio__label {
+  color: #d9dbd5;
+}
+
+.lighting-studio output {
+  min-width: 44px;
+  color: #aeb2aa;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lighting-studio input[type="range"] {
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  accent-color: #f0b96b;
+  cursor: pointer;
+  touch-action: pan-x;
+}
+
+.lighting-studio select,
+.lighting-studio button {
+  min-height: 40px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  font: inherit;
+}
+
+.lighting-studio select {
+  width: 100%;
+  padding: 0 10px;
+  background: #292b29;
+  color: #f5f5f1;
+}
+
+.lighting-studio__actions {
+  margin-top: 15px;
+}
+
+.lighting-studio button {
+  padding: 0 12px;
+  background: rgb(255 255 255 / 8%);
+  color: #eceee9;
+  cursor: pointer;
+}
+
+.lighting-studio__save {
+  flex: 1;
+  border-color: #eab467 !important;
+  background: #eab467 !important;
+  color: #242018 !important;
+  font-weight: 700 !important;
+}
+
+.lighting-studio button:focus-visible,
+.lighting-studio select:focus-visible,
+.lighting-studio input:focus-visible {
+  outline: 2px solid #f5c887;
+  outline-offset: 2px;
+}
+
+.lighting-studio__status {
+  min-height: 17px;
+  margin: 9px 0 0;
+  color: #aeb2aa;
+  font-size: 10px;
+  text-align: center;
+}
+
+.lighting-studio__status[data-state="success"] {
+  color: #a8d7a5;
+}
+
+.lighting-studio__status[data-state="error"] {
+  color: #ffaaa0;
+}
+
+@media (max-width: 520px) {
+  .lighting-studio {
+    top: max(8px, env(safe-area-inset-top));
+    right: 8px;
+    width: min(288px, calc(100vw - 16px));
+    max-height: calc(100dvh - 16px);
+    overflow: auto;
+    padding: 13px;
+  }
+}

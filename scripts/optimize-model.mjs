@@ -4,7 +4,7 @@ import {
   NodeIO,
   PropertyType,
 } from "@gltf-transform/core";
-import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
 import {
   compressTexture,
   dedup,
@@ -137,6 +137,17 @@ for (const texture of document.getRoot().listTextures()) {
     ...(oversized ? { resize: [2048, 2048] } : {}),
     ...(dataTexture ? { lossless: true } : { quality: 82 }),
   });
+}
+
+// WebP image payloads must be declared through EXT_texture_webp. The
+// single-texture helper changes the MIME type but does not add the document
+// extension automatically.
+if (document.getRoot().listTextures().some((texture) => texture.getMimeType() === "image/webp")) {
+  const existingWebPExtension = document
+    .getRoot()
+    .listExtensionsUsed()
+    .find((extension) => extension.extensionName === EXTTextureWebP.EXTENSION_NAME);
+  (existingWebPExtension ?? document.createExtension(EXTTextureWebP)).setRequired(true);
 }
 
 await document.transform(

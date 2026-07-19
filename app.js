@@ -17,9 +17,9 @@ const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenLabel = document.querySelector("#fullscreenLabel");
 const retryButton = document.querySelector("#retryButton");
 
-const defaultOrbit = "0deg 75deg auto";
+const defaultOrbit = modelViewer.getAttribute("camera-orbit") || "0deg 75deg auto";
 const defaultTarget = "auto auto auto";
-const defaultExposure = 1.3;
+const defaultExposure = Number.parseFloat(modelViewer.getAttribute("exposure")) || 1.3;
 const minExposure = 0.8;
 const maxExposure = 1.8;
 const exposureStep = 0.05;
