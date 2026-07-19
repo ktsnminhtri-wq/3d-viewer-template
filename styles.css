@@ -178,6 +178,79 @@ model-viewer:focus-visible {
   -webkit-backdrop-filter: blur(16px);
 }
 
+.brightness-panel {
+  width: min(320px, calc(100vw - 32px));
+  margin-bottom: 8px;
+  padding: 12px 13px 13px;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 14px;
+  background: rgb(248 248 246 / 88%);
+  box-shadow: 0 10px 30px rgb(31 32 31 / 12%);
+  pointer-events: auto;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.brightness-panel[hidden] {
+  display: none;
+}
+
+.brightness-panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #5c5e5b;
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.brightness-panel output {
+  min-width: 3.2em;
+  color: #777976;
+  text-align: right;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.brightness-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brightness-slider-row input[type="range"] {
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  accent-color: #383a38;
+  cursor: pointer;
+  touch-action: pan-x;
+}
+
+.brightness-reset {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgb(35 37 35 / 12%);
+  border-radius: 9px;
+  background: rgb(255 255 253 / 82%);
+  color: #5d5f5c;
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.brightness-reset:hover {
+  background: #fff;
+  color: #292b29;
+}
+
+.brightness-reset:focus-visible {
+  outline: 2px solid #242524;
+  outline-offset: 2px;
+}
+
 .controls button {
   display: inline-flex;
   align-items: center;
@@ -188,6 +261,17 @@ model-viewer:focus-visible {
   border-radius: 11px;
   font-size: 0.78rem;
   font-weight: 620;
+}
+
+.controls .brightness-button {
+  min-width: 44px;
+  padding: 0 10px;
+}
+
+.controls .brightness-button[aria-expanded="true"] {
+  border-color: #292b29;
+  background: #292b29;
+  color: #fff;
 }
 
 .controls button:hover,
@@ -220,6 +304,10 @@ model-viewer:focus-visible {
 
 .fullscreen-icon {
   font-size: 1rem;
+}
+
+.sun-icon {
+  font-size: 1.02rem;
 }
 
 .hint {
@@ -256,6 +344,10 @@ model-viewer:focus-visible {
     padding: 0 7px;
     gap: 5px;
     font-size: 0.7rem;
+  }
+
+  .controls .brightness-button {
+    flex: 0 0 44px;
   }
 
   .hint {

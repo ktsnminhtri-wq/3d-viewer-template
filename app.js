@@ -8,12 +8,68 @@ const errorPanel = document.querySelector("#errorPanel");
 const resetButton = document.querySelector("#resetButton");
 const rotateButton = document.querySelector("#rotateButton");
 const rotateLabel = document.querySelector("#rotateLabel");
+const brightnessButton = document.querySelector("#brightnessButton");
+const brightnessPanel = document.querySelector("#brightnessPanel");
+const brightnessSlider = document.querySelector("#brightnessSlider");
+const brightnessValue = document.querySelector("#brightnessValue");
+const brightnessResetButton = document.querySelector("#brightnessResetButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenLabel = document.querySelector("#fullscreenLabel");
 const retryButton = document.querySelector("#retryButton");
 
 const defaultOrbit = "0deg 75deg auto";
 const defaultTarget = "auto auto auto";
+const defaultExposure = 1.3;
+const minExposure = 0.8;
+const maxExposure = 1.8;
+const exposureStep = 0.05;
+const exposureStorageKey = "modelViewerExposure";
+
+function normalizeExposure(value) {
+  const parsedValue = Number.parseFloat(value);
+  const safeValue = Number.isFinite(parsedValue) ? parsedValue : defaultExposure;
+  const clampedValue = Math.min(maxExposure, Math.max(minExposure, safeValue));
+  return Math.round((clampedValue - minExposure) / exposureStep) * exposureStep
+    + minExposure;
+}
+
+function readSavedExposure() {
+  try {
+    return normalizeExposure(localStorage.getItem(exposureStorageKey));
+  } catch {
+    return defaultExposure;
+  }
+}
+
+function applyExposure(value, save = true) {
+  const exposure = normalizeExposure(value);
+  modelViewer.exposure = exposure;
+  brightnessSlider.value = exposure.toFixed(2);
+  brightnessValue.value = exposure.toFixed(2);
+  brightnessValue.textContent = exposure.toFixed(2);
+
+  if (save) {
+    try {
+      localStorage.setItem(exposureStorageKey, exposure.toFixed(2));
+    } catch {
+      // The viewer still works when storage is unavailable or disabled.
+    }
+  }
+}
+
+function setBrightnessPanelOpen(isOpen) {
+  brightnessPanel.hidden = !isOpen;
+  brightnessButton.setAttribute("aria-expanded", String(isOpen));
+}
+
+const savedExposure = readSavedExposure();
+brightnessSlider.value = savedExposure.toFixed(2);
+brightnessValue.value = savedExposure.toFixed(2);
+brightnessValue.textContent = savedExposure.toFixed(2);
+
+customElements.whenDefined("model-viewer").then(() => {
+  applyExposure(savedExposure, false);
+});
 
 modelViewer.addEventListener("progress", (event) => {
   const percentage = Math.round(event.detail.totalProgress * 100);
@@ -50,6 +106,39 @@ rotateButton.addEventListener("click", () => {
   rotateButton.setAttribute("aria-pressed", String(isRotating));
   rotateButton.title = isRotating ? "Tắt tự động xoay" : "Bật tự động xoay";
   rotateLabel.textContent = isRotating ? "Dừng xoay" : "Tự xoay";
+});
+
+brightnessButton.addEventListener("click", () => {
+  const isOpen = brightnessButton.getAttribute("aria-expanded") !== "true";
+  setBrightnessPanelOpen(isOpen);
+
+  if (isOpen) brightnessSlider.focus();
+});
+
+brightnessSlider.addEventListener("input", () => {
+  applyExposure(brightnessSlider.value);
+});
+
+brightnessResetButton.addEventListener("click", () => {
+  applyExposure(defaultExposure);
+  brightnessSlider.focus();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (
+    brightnessButton.getAttribute("aria-expanded") === "true"
+    && !brightnessPanel.contains(event.target)
+    && !brightnessButton.contains(event.target)
+  ) {
+    setBrightnessPanelOpen(false);
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !brightnessPanel.hidden) {
+    setBrightnessPanelOpen(false);
+    brightnessButton.focus();
+  }
 });
 
 fullscreenButton.addEventListener("click", async () => {
