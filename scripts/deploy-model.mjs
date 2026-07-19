@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, watch as watchFiles } from "node:fs";
 import {
   access,
   copyFile,
   readFile,
+  readdir,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -21,16 +24,19 @@ const ROOT = process.cwd();
 const MODEL = path.join(ROOT, "model.glb");
 const BACKUP = path.join(ROOT, "model-source-backup.glb");
 const CANDIDATE = path.join(ROOT, "model-optimized.glb");
+const RECEIPT = path.join(ROOT, ".preview-validation.json");
 const OPTIMIZER = path.join(ROOT, "scripts", "optimize-model.mjs");
 const VALIDATOR = path.join(ROOT, "scripts", "validate-model.mjs");
-const GLTF_CLI = path.join(
-  ROOT,
-  "node_modules",
-  "@gltf-transform",
-  "cli",
-  "bin",
-  "cli.js",
-);
+const GLTF_CLI = path.join(ROOT, "node_modules", "@gltf-transform", "cli", "bin", "cli.js");
+const PREVIEW_MODE = process.argv.includes("--preview");
+const NO_OPEN = process.argv.includes("--no-open");
+const PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 8000);
+const CORE_VISUAL_FILES = ["model.glb", "index.html", "styles.css", "app.js"];
+
+let beforeAnalysis;
+let afterAnalysis;
+let candidateAnalysis;
+let validationResult = "NOT RUN";
 
 function formatMiB(bytes) {
   return `${(bytes / MIB).toFixed(2)} MiB`;
@@ -55,9 +61,7 @@ function run(command, args, { capture = false, allowFailure = false } = {}) {
     child.on("close", (code) => {
       const result = { code: code ?? 1, stdout, stderr };
       if (code === 0 || allowFailure) resolve(result);
-      else reject(new Error(
-        `${command} ${args.join(" ")} failed with exit code ${code}.\n${stdout}${stderr}`,
-      ));
+      else reject(new Error(`${command} ${args.join(" ")} failed with exit code ${code}.\n${stdout}${stderr}`));
     });
   });
 }
@@ -71,24 +75,21 @@ async function git(args, options) {
 }
 
 async function assertBackupIsIgnored() {
-  const result = await git(
-    ["check-ignore", "-q", "model-source-backup.glb"],
-    { capture: true, allowFailure: true },
-  );
+  const result = await git(["check-ignore", "-q", "model-source-backup.glb"], {
+    capture: true,
+    allowFailure: true,
+  });
   if (result.code !== 0) {
-    throw new Error(
-      "model-source-backup.glb is not excluded by .gitignore. Deployment stopped.",
-    );
+    throw new Error("model-source-backup.glb is not excluded by .gitignore. Workflow stopped.");
   }
 }
 
 async function validateSpec(filePath) {
-  const result = await run(
-    process.execPath,
-    [GLTF_CLI, "validate", filePath],
-    { capture: true, allowFailure: true },
-  );
-  if (result.code !== 0 || /No errors found\./i.test(result.stdout) === false) {
+  const result = await run(process.execPath, [GLTF_CLI, "validate", filePath], {
+    capture: true,
+    allowFailure: true,
+  });
+  if (result.code !== 0 || !/No errors found\./i.test(result.stdout)) {
     throw new Error(`glTF specification validation failed.\n${result.stdout}${result.stderr}`);
   }
   console.info("glTF specification validation: PASS");
@@ -100,45 +101,15 @@ async function validateComparison(sourcePath, outputPath) {
 }
 
 async function validateWebsite() {
-  const indexPath = path.join(ROOT, "index.html");
-  const indexHTML = await readFile(indexPath, "utf8");
+  const indexHTML = await readFile(path.join(ROOT, "index.html"), "utf8");
   if (!/src=["']\.\/model\.glb["']/.test(indexHTML)) {
     throw new Error('index.html must load the model from src="./model.glb".');
   }
 
-  const server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, "http://127.0.0.1").pathname;
-      const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
-      const allowed = new Set([
-        "index.html",
-        "styles.css",
-        "app.js",
-        "model.glb",
-        "assets/spruit-sunrise-1k-hdr.jpg",
-      ]);
-      if (!allowed.has(relativePath)) {
-        response.writeHead(404).end();
-        return;
-      }
-      const filePath = path.join(ROOT, relativePath);
-      const fileStats = await stat(filePath);
-      response.setHeader("Content-Length", String(fileStats.size));
-      response.writeHead(200);
-      if (request.method === "HEAD") response.end();
-      else createReadStream(filePath).pipe(response);
-    } catch {
-      response.writeHead(500).end();
-    }
-  });
-
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
+  const server = createStaticServer();
+  await listen(server, 0, "127.0.0.1");
   try {
-    const address = server.address();
-    const baseURL = `http://127.0.0.1:${address.port}`;
+    const baseURL = `http://127.0.0.1:${server.address().port}`;
     const indexResponse = await fetch(`${baseURL}/index.html`);
     const modelResponse = await fetch(`${baseURL}/model.glb`, { method: "HEAD" });
     if (!indexResponse.ok || !modelResponse.ok) {
@@ -148,9 +119,181 @@ async function validateWebsite() {
       throw new Error("Local server returned an unexpected model.glb byte length.");
     }
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await closeServer(server);
   }
-  console.info("Local website validation: PASS (index.html → ./model.glb)");
+  console.info("Local website validation: PASS (index.html -> ./model.glb)");
+}
+
+async function listFiles(directory, prefix = "") {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const output = [];
+    for (const entry of entries) {
+      const relative = path.posix.join(prefix, entry.name);
+      if (entry.isDirectory()) output.push(...await listFiles(path.join(directory, entry.name), relative));
+      else if (entry.isFile()) output.push(relative);
+    }
+    return output;
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function visualFiles() {
+  const assets = (await listFiles(path.join(ROOT, "assets"), "assets")).sort();
+  return [...CORE_VISUAL_FILES, ...assets];
+}
+
+async function hashFile(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+async function visualHashes() {
+  const hashes = {};
+  for (const relativePath of await visualFiles()) {
+    hashes[relativePath] = await hashFile(path.join(ROOT, relativePath));
+  }
+  return hashes;
+}
+
+function hashesFingerprint(hashes) {
+  return createHash("sha256").update(JSON.stringify(hashes)).digest("hex");
+}
+
+async function writePreviewReceipt() {
+  const files = await visualHashes();
+  const receipt = {
+    version: 1,
+    passed: true,
+    validatedAt: new Date().toISOString(),
+    fingerprint: hashesFingerprint(files),
+    files,
+    model: printableSummary(afterAnalysis),
+  };
+  await writeFile(RECEIPT, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  return receipt;
+}
+
+async function verifyPreviewReceipt() {
+  let receipt;
+  try {
+    receipt = JSON.parse(await readFile(RECEIPT, "utf8"));
+  } catch {
+    throw new Error("Preview validation is missing. Run `npm run preview`, review the viewer, then stop it before deploying.");
+  }
+  const files = await visualHashes();
+  const fingerprint = hashesFingerprint(files);
+  if (receipt.version !== 1 || receipt.passed !== true || receipt.fingerprint !== fingerprint) {
+    throw new Error("The model or viewer changed after the last successful preview. Run `npm run preview` again before deploying.");
+  }
+  console.info(`Preview validation: PASS (${receipt.validatedAt})`);
+  return receipt;
+}
+
+function contentType(filePath) {
+  const types = {
+    ".css": "text/css; charset=utf-8",
+    ".glb": "model/gltf-binary",
+    ".hdr": "application/octet-stream",
+    ".html": "text/html; charset=utf-8",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".js": "text/javascript; charset=utf-8",
+    ".png": "image/png",
+    ".webp": "image/webp",
+  };
+  return types[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
+function safeLocalPath(urlPath) {
+  const decoded = decodeURIComponent(urlPath).replace(/^\/+/, "") || "index.html";
+  const normalized = path.normalize(decoded);
+  if (normalized.startsWith("..") || path.isAbsolute(normalized)) return null;
+  const resolved = path.resolve(ROOT, normalized);
+  return resolved.startsWith(`${path.resolve(ROOT)}${path.sep}`) ? resolved : null;
+}
+
+function createStaticServer({ liveReloadClients } = {}) {
+  return createServer(async (request, response) => {
+    try {
+      const pathname = new URL(request.url, "http://127.0.0.1").pathname;
+      if (pathname === "/__preview_events" && liveReloadClients) {
+        response.writeHead(200, {
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "Content-Type": "text/event-stream",
+        });
+        response.write(": connected\n\n");
+        liveReloadClients.add(response);
+        request.on("close", () => liveReloadClients.delete(response));
+        return;
+      }
+      const filePath = safeLocalPath(pathname);
+      if (!filePath) {
+        response.writeHead(403).end();
+        return;
+      }
+      const fileStats = await stat(filePath);
+      if (!fileStats.isFile()) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Content-Type", contentType(filePath));
+      if (request.method === "HEAD") {
+        response.setHeader("Content-Length", String(fileStats.size));
+        response.writeHead(200).end();
+      } else if (path.basename(filePath).toLowerCase() === "index.html" && liveReloadClients) {
+        const html = await readFile(filePath, "utf8");
+        const script = '<script>new EventSource("./__preview_events").onmessage=()=>location.reload();</script>';
+        const injected = html.includes("</body>") ? html.replace("</body>", `${script}</body>`) : `${html}${script}`;
+        response.writeHead(200).end(injected);
+      } else {
+        response.setHeader("Content-Length", String(fileStats.size));
+        response.writeHead(200);
+        createReadStream(filePath).pipe(response);
+      }
+    } catch (error) {
+      response.writeHead(error.code === "ENOENT" ? 404 : 500).end();
+    }
+  });
+}
+
+function listen(server, port, host) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, resolve);
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
+
+function openBrowser(url) {
+  if (NO_OPEN) return;
+  let command;
+  let args;
+  if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", url];
+  } else if (process.platform === "darwin") {
+    command = "open";
+    args = [url];
+  } else {
+    command = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => console.info(`Open this URL manually: ${url}`));
+    child.unref();
+  } catch {
+    console.info(`Open this URL manually: ${url}`);
+  }
 }
 
 function githubPagesURL(remoteURL) {
@@ -175,70 +318,16 @@ function printLargestContributors(analysis) {
   console.table(analysis.largestTextures.slice(0, 10).map((texture) => ({
     texture: texture.name,
     size: formatMiB(texture.bytes),
-    resolution: texture.width && texture.height
-      ? `${texture.width}×${texture.height}`
-      : "unknown",
+    resolution: texture.width && texture.height ? `${texture.width}x${texture.height}` : "unknown",
   })));
-  console.error(
-    "SketchUp action required: simplify the highest-triangle furniture/components, "
-    + "replace detailed background assets with low-poly versions, purge unused components "
-    + "and materials, reuse shared materials, and reduce source texture dimensions before export.",
-  );
+  console.error("SketchUp action required: simplify the highest-triangle furniture/components, replace detailed background assets with low-poly versions, purge unused components and materials, reuse shared materials, and reduce source texture dimensions before export.");
 }
 
-async function commitAndPush(originalBytes, finalBytes) {
-  await assertBackupIsIgnored();
-  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], { capture: true })).stdout.trim();
-  if (branch !== "main") {
-    throw new Error(`Deployment must run from main, not ${branch}.`);
-  }
-
-  await git(["add", "-A"]);
-  const stagedOutput = (await git(
-    ["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-    { capture: true },
-  )).stdout.trim();
-  const stagedFiles = stagedOutput ? stagedOutput.split(/\r?\n/) : [];
-  const forbidden = /^(?:node_modules\/|model-original\.glb$|model-source-backup\.glb$|model-optimized\.glb$)/i;
-  for (const relativePath of stagedFiles) {
-    if (forbidden.test(relativePath)) {
-      throw new Error(`Forbidden deployment file was staged: ${relativePath}`);
-    }
-    const stagedPath = path.join(ROOT, relativePath);
-    try {
-      const fileStats = await stat(stagedPath);
-      if (fileStats.size > GITHUB_FILE_LIMIT) {
-        throw new Error(`Refusing to commit file over 100 MiB: ${relativePath}`);
-      }
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-  }
-
-  if (stagedFiles.length) {
-    const automationIncluded = stagedFiles.includes("scripts/deploy-model.mjs");
-    const message = automationIncluded
-      ? "Automate GLB optimization and deployment"
-      : `Deploy validated 3D model (${formatMiB(originalBytes)} → ${formatMiB(finalBytes)})`;
-    await git(["commit", "-m", message]);
-  } else {
-    console.info("No file changes to commit.");
-  }
-  await git(["push", "origin", "main"]);
-  return (await git(["remote", "get-url", "origin"], { capture: true })).stdout.trim();
-}
-
-let beforeAnalysis;
-let afterAnalysis;
-let candidateAnalysis;
-let validationResult = "NOT RUN";
-
-async function main() {
+async function prepareAndValidateModel() {
+  validationResult = "NOT RUN";
   await access(MODEL);
   await assertBackupIsIgnored();
-
-  const initialStats = await stat(MODEL);
-  console.info(`Found model.glb (${formatMiB(initialStats.size)}).`);
+  console.info(`Found model.glb (${formatMiB((await stat(MODEL)).size)}).`);
   await copyFile(MODEL, BACKUP);
   console.info("Created local backup: model-source-backup.glb");
 
@@ -266,9 +355,7 @@ async function main() {
     console.info("Optimized candidate:", printableSummary(candidateAnalysis));
     if (candidateAnalysis.totalBytes > GITHUB_FILE_LIMIT) {
       printLargestContributors(candidateAnalysis);
-      throw new Error(
-        `Optimization produced ${formatMiB(candidateAnalysis.totalBytes)}, still over 100 MiB. Nothing was committed or pushed.`,
-      );
+      throw new Error(`Optimization produced ${formatMiB(candidateAnalysis.totalBytes)}, still over 100 MiB.`);
     }
     await validateComparison(BACKUP, CANDIDATE);
     await copyFile(CANDIDATE, MODEL);
@@ -280,38 +367,141 @@ async function main() {
   afterAnalysis = await analyzeGLB(MODEL);
   if (afterAnalysis.totalBytes > GITHUB_FILE_LIMIT) {
     printLargestContributors(afterAnalysis);
-    throw new Error("Final model.glb exceeds 100 MiB. Nothing was committed or pushed.");
+    throw new Error("Final model.glb exceeds 100 MiB.");
   }
   if (afterAnalysis.sceneTriangles !== beforeAnalysis.sceneTriangles) {
-    throw new Error("Rendered triangle count changed. Nothing was committed or pushed.");
+    throw new Error("Rendered triangle count changed.");
   }
-  validationResult = "PASS";
   await validateWebsite();
+  validationResult = "PASS";
+  return { beforeAnalysis, afterAnalysis };
+}
 
-  const remoteURL = await commitAndPush(beforeAnalysis.totalBytes, afterAnalysis.totalBytes);
+async function commitAndPush(originalBytes, finalBytes) {
+  await assertBackupIsIgnored();
+  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], { capture: true })).stdout.trim();
+  if (branch !== "main") throw new Error(`Deployment must run from main, not ${branch}.`);
+
+  await git(["add", "-A"]);
+  const stagedOutput = (await git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"], { capture: true })).stdout.trim();
+  const stagedFiles = stagedOutput ? stagedOutput.split(/\r?\n/) : [];
+  const forbidden = /^(?:node_modules\/|model-original\.glb$|model-source-backup\.glb$|model-optimized\.glb$|\.preview-validation\.json$)/i;
+  for (const relativePath of stagedFiles) {
+    if (forbidden.test(relativePath)) throw new Error(`Forbidden deployment file was staged: ${relativePath}`);
+    try {
+      if ((await stat(path.join(ROOT, relativePath))).size > GITHUB_FILE_LIMIT) {
+        throw new Error(`Refusing to commit file over 100 MiB: ${relativePath}`);
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  if (stagedFiles.length) {
+    await git(["commit", "-m", "Add safe preview and deployment workflow"]);
+  } else {
+    console.info("No file changes to commit.");
+  }
+  await git(["push", "origin", "main"]);
+  return (await git(["remote", "get-url", "origin"], { capture: true })).stdout.trim();
+}
+
+function printSummary(title) {
   const reduction = beforeAnalysis.totalBytes
     ? (1 - afterAnalysis.totalBytes / beforeAnalysis.totalBytes) * 100
     : 0;
-
-  console.info("\nDeployment summary");
+  console.info(`\n${title}`);
   console.info(`Original size:       ${formatMiB(beforeAnalysis.totalBytes)}`);
   console.info(`Optimized size:      ${formatMiB(afterAnalysis.totalBytes)}`);
   console.info(`Reduction:           ${reduction.toFixed(2)}%`);
-  console.info(`Primitives:          ${beforeAnalysis.primitives.toLocaleString()} → ${afterAnalysis.primitives.toLocaleString()}`);
-  console.info(`Materials:           ${beforeAnalysis.materials.toLocaleString()} → ${afterAnalysis.materials.toLocaleString()}`);
-  console.info(`Rendered triangles:  ${beforeAnalysis.sceneTriangles.toLocaleString()} → ${afterAnalysis.sceneTriangles.toLocaleString()}`);
+  console.info(`Primitives:          ${beforeAnalysis.primitives.toLocaleString()} -> ${afterAnalysis.primitives.toLocaleString()}`);
+  console.info(`Materials:           ${beforeAnalysis.materials.toLocaleString()} -> ${afterAnalysis.materials.toLocaleString()}`);
+  console.info(`Rendered triangles:  ${beforeAnalysis.sceneTriangles.toLocaleString()} -> ${afterAnalysis.sceneTriangles.toLocaleString()}`);
   console.info(`Validation:          ${validationResult}`);
+}
+
+function isWatchedFile(filename) {
+  if (!filename) return false;
+  const relative = String(filename).replaceAll("\\", "/").replace(/^\.\//, "");
+  return CORE_VISUAL_FILES.includes(relative) || relative.startsWith("assets/");
+}
+
+async function previewMain() {
+  await prepareAndValidateModel();
+  let receipt = await writePreviewReceipt();
+  printSummary("Preview validation summary");
+
+  const clients = new Set();
+  const server = createStaticServer({ liveReloadClients: clients });
+  await listen(server, PREVIEW_PORT, "127.0.0.1");
+  const url = `http://localhost:${PREVIEW_PORT}`;
+  console.info(`\nPreview URL: ${url}`);
+  console.info("Watching model and viewer files. Press Ctrl+C to stop.");
+  openBrowser(url);
+
+  let timer;
+  let rebuilding = false;
+  let pending = false;
+  const rebuild = async () => {
+    if (rebuilding) {
+      pending = true;
+      return;
+    }
+    rebuilding = true;
+    try {
+      const current = hashesFingerprint(await visualHashes());
+      if (current === receipt.fingerprint) return;
+      console.info("\nVisual file change detected; rebuilding preview...");
+      await prepareAndValidateModel();
+      receipt = await writePreviewReceipt();
+      for (const client of clients) client.write("data: reload\n\n");
+      console.info("Preview rebuilt and browser refresh requested.");
+    } catch (error) {
+      validationResult = "FAIL";
+      await rm(RECEIPT, { force: true });
+      console.error(`Preview rebuild failed: ${error.message}`);
+      console.error("Deployment remains locked until a preview succeeds.");
+    } finally {
+      rebuilding = false;
+      if (pending) {
+        pending = false;
+        void rebuild();
+      }
+    }
+  };
+  const watcher = watchFiles(ROOT, { recursive: true }, (_event, filename) => {
+    if (!isWatchedFile(filename)) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => void rebuild(), 750);
+  });
+
+  await new Promise((resolve) => {
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
+  });
+  clearTimeout(timer);
+  watcher.close();
+  for (const client of clients) client.end();
+  await closeServer(server);
+  console.info("Preview stopped. No commit or push was performed.");
+}
+
+async function deployMain() {
+  await verifyPreviewReceipt();
+  await prepareAndValidateModel();
+  await verifyPreviewReceipt();
+  const remoteURL = await commitAndPush(beforeAnalysis.totalBytes, afterAnalysis.totalBytes);
+  printSummary("Deployment summary");
   console.info(`GitHub Pages:        ${githubPagesURL(remoteURL)}`);
 }
 
 try {
-  await main();
+  if (PREVIEW_MODE) await previewMain();
+  else await deployMain();
 } catch (error) {
-  console.error(`\nDEPLOYMENT STOPPED SAFELY\n${error.message}`);
-  if (
-    beforeAnalysis
-    && (beforeAnalysis.totalBytes > GITHUB_FILE_LIMIT || candidateAnalysis?.totalBytes > GITHUB_FILE_LIMIT)
-  ) {
+  const label = PREVIEW_MODE ? "PREVIEW STOPPED" : "DEPLOYMENT STOPPED SAFELY";
+  console.error(`\n${label}\n${error.message}`);
+  if (beforeAnalysis && (beforeAnalysis.totalBytes > GITHUB_FILE_LIMIT || candidateAnalysis?.totalBytes > GITHUB_FILE_LIMIT)) {
     printLargestContributors(candidateAnalysis ?? beforeAnalysis);
   }
   console.error(`Validation: ${validationResult}`);

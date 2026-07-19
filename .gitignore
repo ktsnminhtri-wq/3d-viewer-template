@@ -2,6 +2,7 @@ node_modules/
 model-original.glb
 model-source-backup.glb
 model-optimized.glb
+.preview-validation.json
 .agents/
 model-analysis-summary.json
 model-*-analysis.csv

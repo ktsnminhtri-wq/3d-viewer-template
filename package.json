@@ -7,6 +7,7 @@
   "scripts": {
     "optimize:model": "node --max-old-space-size=4096 ./scripts/optimize-model.mjs",
     "validate:model": "node --max-old-space-size=4096 ./scripts/validate-model.mjs",
+    "preview": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs --preview",
     "deploy": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs"
   },
   "keywords": [],
