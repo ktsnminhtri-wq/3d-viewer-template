@@ -178,6 +178,33 @@ model-viewer:focus-visible {
   -webkit-backdrop-filter: blur(16px);
 }
 
+.perspective-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid rgb(35 37 35 / 10%);
+  border-radius: 11px;
+  background: rgb(35 37 35 / 5%);
+}
+
+.controls .perspective-toggle button {
+  min-width: 38px;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls .perspective-toggle button[aria-pressed="true"] {
+  background: rgb(255 255 253 / 94%);
+  box-shadow: 0 2px 7px rgb(31 32 31 / 10%);
+  color: #242524;
+}
+
 .controls button {
   display: inline-flex;
   align-items: center;
@@ -247,7 +274,7 @@ model-viewer:focus-visible {
   }
 
   .controls {
-    width: min(100%, 350px);
+    width: min(100%, 430px);
   }
 
   .controls button {
@@ -256,6 +283,12 @@ model-viewer:focus-visible {
     padding: 0 7px;
     gap: 5px;
     font-size: 0.7rem;
+  }
+
+  .controls .perspective-toggle button {
+    flex: none;
+    min-width: 34px;
+    padding: 0 7px;
   }
 
   .hint {

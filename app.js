@@ -11,9 +11,42 @@ const rotateLabel = document.querySelector("#rotateLabel");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenLabel = document.querySelector("#fullscreenLabel");
 const retryButton = document.querySelector("#retryButton");
+const twoPointButton = document.querySelector("#twoPointButton");
+const threePointButton = document.querySelector("#threePointButton");
 
 const defaultOrbit = modelViewer.getAttribute("camera-orbit") || "0deg 75deg auto";
 const defaultTarget = "auto auto auto";
+const defaultMinOrbit = modelViewer.getAttribute("min-camera-orbit") || "auto auto auto";
+const defaultMaxOrbit = modelViewer.getAttribute("max-camera-orbit") || "auto auto auto";
+const TWO_POINT_PHI = "90deg";
+let perspectiveMode = "3P";
+
+function updatePerspectiveButtons() {
+  const isTwoPoint = perspectiveMode === "2P";
+  twoPointButton.setAttribute("aria-pressed", String(isTwoPoint));
+  threePointButton.setAttribute("aria-pressed", String(!isTwoPoint));
+}
+
+function setPerspectiveMode(mode) {
+  if (mode === perspectiveMode) return;
+
+  const orbit = modelViewer.getCameraOrbit();
+  perspectiveMode = mode;
+
+  if (mode === "2P") {
+    // A level perspective camera (phi = 90deg) keeps glTF's Y-up verticals
+    // parallel while preserving horizontal orbit, pan and perspective zoom.
+    modelViewer.minCameraOrbit = `auto ${TWO_POINT_PHI} auto`;
+    modelViewer.maxCameraOrbit = `auto ${TWO_POINT_PHI} auto`;
+    modelViewer.cameraOrbit = `${orbit.theta}rad ${TWO_POINT_PHI} ${orbit.radius}m`;
+  } else {
+    modelViewer.minCameraOrbit = defaultMinOrbit;
+    modelViewer.maxCameraOrbit = defaultMaxOrbit;
+    modelViewer.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${orbit.radius}m`;
+  }
+
+  updatePerspectiveButtons();
+}
 
 modelViewer.addEventListener("progress", (event) => {
   const percentage = Math.round(event.detail.totalProgress * 100);
@@ -39,10 +72,15 @@ modelViewer.addEventListener("error", () => {
 
 resetButton.addEventListener("click", () => {
   modelViewer.cameraTarget = defaultTarget;
-  modelViewer.cameraOrbit = defaultOrbit;
+  modelViewer.cameraOrbit = perspectiveMode === "2P"
+    ? `0deg ${TWO_POINT_PHI} auto`
+    : defaultOrbit;
   modelViewer.fieldOfView = "30deg";
   modelViewer.jumpCameraToGoal();
 });
+
+twoPointButton.addEventListener("click", () => setPerspectiveMode("2P"));
+threePointButton.addEventListener("click", () => setPerspectiveMode("3P"));
 
 rotateButton.addEventListener("click", () => {
   const isRotating = !modelViewer.hasAttribute("auto-rotate");
