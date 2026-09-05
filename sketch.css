@@ -94,6 +94,69 @@
   outline-offset: 2px;
 }
 
+.sketch-support {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sketch-support__toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 7%);
+}
+
+.sketch-debug .sketch-support__toggle button {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+}
+
+.sketch-debug .sketch-support__toggle button[aria-pressed="true"] {
+  background: rgb(172 215 255 / 20%);
+  color: #d8ecff;
+}
+
+.sketch-support > button {
+  min-height: 36px;
+  padding-inline: 10px;
+}
+
+.sketch-guide-instruction {
+  margin: 8px 0 0;
+  color: #acd7ff;
+  text-align: center;
+}
+
+.sketch-offset {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  color: #aeb2ac;
+}
+
+.sketch-offset[hidden],
+.sketch-guide-instruction[hidden] {
+  display: none;
+}
+
+.sketch-offset input {
+  width: 100%;
+  accent-color: #acd7ff;
+}
+
+.sketch-offset output {
+  color: #f5f5f2;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 520px) {
   .sketch-debug {
     top: max(8px, env(safe-area-inset-top));

@@ -1,4 +1,12 @@
 import * as THREE from "https://unpkg.com/three@0.174.0/build/three.module.js";
+import {
+  PRIMARY_MODEL_SURFACE_ID,
+  REFERENCE_TYPES,
+  createSpatialReferenceStore,
+  createStrokeRecord,
+  isStrokeReferenceVisible,
+  resolveStrokePoint,
+} from "./sketch-spatial-model.js";
 
 const modelViewer = document.querySelector("#modelViewer");
 const viewerShell = document.querySelector("#viewerShell");
@@ -11,11 +19,11 @@ if (modelViewer && viewerShell) {
 
   const debugPanel = document.createElement("aside");
   debugPanel.className = "sketch-debug";
-  debugPanel.setAttribute("aria-label", "Sprint 01B pen debug");
+  debugPanel.setAttribute("aria-label", "Spatial sketch controls");
   debugPanel.innerHTML = `
     <div class="sketch-debug__title">
       <strong>Pen hit test</strong>
-      <span class="sketch-debug__badge">Sprint 01B</span>
+      <span class="sketch-debug__badge">Sprint 05</span>
     </div>
     <dl>
       <dt>pointer</dt><dd data-sketch-debug="pointerType">none</dd>
@@ -29,6 +37,19 @@ if (modelViewer && viewerShell) {
       <button type="button" data-sketch-action="undo" disabled>Undo</button>
       <button type="button" data-sketch-action="clear" disabled>Clear</button>
     </div>
+    <div class="sketch-support" aria-label="Drawing support">
+      <div class="sketch-support__toggle" role="group" aria-label="Drawing support">
+        <button type="button" data-sketch-support="surface" aria-pressed="true">Model</button>
+        <button type="button" data-sketch-support="plane" aria-pressed="false">Guide</button>
+      </div>
+      <button type="button" data-sketch-action="new-guide">New Guide</button>
+    </div>
+    <p class="sketch-guide-instruction" data-guide-instruction hidden>Tap a surface</p>
+    <label class="sketch-offset" data-guide-offset hidden>
+      <span>Offset</span>
+      <input type="range" min="-1" max="1" step="0.01" value="0" />
+      <output>0.000</output>
+    </label>
   `;
   viewerShell.append(debugPanel);
 
@@ -65,10 +86,42 @@ if (modelViewer && viewerShell) {
   );
   const undoButton = debugPanel.querySelector('[data-sketch-action="undo"]');
   const clearButton = debugPanel.querySelector('[data-sketch-action="clear"]');
+  const newGuideButton = debugPanel.querySelector('[data-sketch-action="new-guide"]');
+  const modelSupportButton = debugPanel.querySelector('[data-sketch-support="surface"]');
+  const guideSupportButton = debugPanel.querySelector('[data-sketch-support="plane"]');
+  const guideInstruction = debugPanel.querySelector("[data-guide-instruction]");
+  const offsetControl = debugPanel.querySelector("[data-guide-offset]");
+  const offsetSlider = offsetControl.querySelector('input[type="range"]');
+  const offsetOutput = offsetControl.querySelector("output");
 
   const strokes = [];
+  const strokeRenderStates = new Map();
+  const guideVisuals = new Map();
+  const references = createSpatialReferenceStore({
+    onReferenceChange: handleReferenceChange,
+  });
+  const guideGeometry = new THREE.PlaneGeometry(1, 1);
+  const guideMaterial = new THREE.MeshBasicMaterial({
+    color: 0x8fc9e8,
+    depthTest: true,
+    depthWrite: false,
+    opacity: 0.14,
+    side: THREE.DoubleSide,
+    transparent: true,
+  });
+  const raycaster = new THREE.Raycaster();
+  const rayInModelSpace = new THREE.Ray();
+  const intersectionPlane = new THREE.Plane();
+  const inverseTargetMatrix = new THREE.Matrix4();
+  const activeDrawingSupport = {
+    type: REFERENCE_TYPES.SURFACE,
+    id: PRIMARY_MODEL_SURFACE_ID,
+  };
   let activeStroke = null;
   let activePenId = null;
+  let guideSelectionPenId = null;
+  let guideSelectionPending = false;
+  let activeTracePlaneId = null;
   let lastStrokePointCount = 0;
   let resumeAutoRotate = false;
   let modelDiagonal = 1;
@@ -76,6 +129,7 @@ if (modelViewer && viewerShell) {
   let renderRequested = false;
   let lastProjectionError = null;
   let maximumProjectionError = 0;
+  const tracePlaneOffsets = new Map();
 
   function pointValue(vector) {
     return {
@@ -83,6 +137,165 @@ if (modelViewer && viewerShell) {
       y: Number(vector.y),
       z: Number(vector.z),
     };
+  }
+
+  function setActiveDrawingSupport(type, id) {
+    if (!references.hasReference(type, id)) return false;
+    activeDrawingSupport.type = type;
+    activeDrawingSupport.id = id;
+    guideSelectionPending = false;
+    updateDrawingSupportUI();
+    return true;
+  }
+
+  function updateDrawingSupportUI() {
+    const guideActive = activeDrawingSupport.type === REFERENCE_TYPES.PLANE;
+    modelSupportButton.setAttribute("aria-pressed", String(!guideActive));
+    guideSupportButton.setAttribute("aria-pressed", String(guideActive));
+    guideInstruction.hidden = !guideSelectionPending;
+    offsetControl.hidden = !guideActive;
+
+    if (!guideActive) return;
+    const state = tracePlaneOffsets.get(activeDrawingSupport.id);
+    if (!state) return;
+    offsetSlider.value = String(state.offset);
+    offsetOutput.value = state.offset.toFixed(3);
+  }
+
+  function beginGuideSelection() {
+    guideSelectionPending = true;
+    guideInstruction.hidden = false;
+    offsetControl.hidden = true;
+  }
+
+  function guideSize() {
+    return Math.max(modelDiagonal * 0.45, 0.01);
+  }
+
+  function configureOffsetSlider() {
+    const limit = Math.max(modelDiagonal * 0.15, 0.01);
+    offsetSlider.min = String(-limit);
+    offsetSlider.max = String(limit);
+    offsetSlider.step = String(Math.max(modelDiagonal / 1000, 0.001));
+  }
+
+  function stablePlaneAxes(normalValue) {
+    const normal = new THREE.Vector3(
+      normalValue.x,
+      normalValue.y,
+      normalValue.z,
+    ).normalize();
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const verticalInPlane = worldUp.clone().addScaledVector(
+      normal,
+      -worldUp.dot(normal),
+    );
+
+    if (verticalInPlane.lengthSq() > 1e-8) {
+      const yAxis = verticalInPlane.normalize();
+      const xAxis = new THREE.Vector3().crossVectors(yAxis, normal).normalize();
+      return { xAxis: pointValue(xAxis), yAxis: pointValue(yAxis) };
+    }
+
+    syncCamera();
+    inverseTargetMatrix.copy(targetRoot.matrixWorld).invert();
+    const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
+      .transformDirection(inverseTargetMatrix);
+    cameraRight.addScaledVector(normal, -cameraRight.dot(normal));
+    if (cameraRight.lengthSq() <= 1e-8) {
+      cameraRight.set(1, 0, 0).addScaledVector(normal, -normal.x);
+    }
+    if (cameraRight.lengthSq() <= 1e-8) {
+      cameraRight.set(0, 0, 1).addScaledVector(normal, -normal.z);
+    }
+
+    const xAxis = cameraRight.normalize();
+    const yAxis = new THREE.Vector3().crossVectors(normal, xAxis).normalize();
+    return { xAxis: pointValue(xAxis), yAxis: pointValue(yAxis) };
+  }
+
+  function ensureGuideVisual(plane) {
+    let mesh = guideVisuals.get(plane.id);
+    if (!mesh) {
+      mesh = new THREE.Mesh(guideGeometry, guideMaterial);
+      mesh.renderOrder = 1;
+      mesh.frustumCulled = false;
+      guideVisuals.set(plane.id, mesh);
+      targetRoot.add(mesh);
+    }
+    return mesh;
+  }
+
+  function updateGuideVisual(plane) {
+    const mesh = ensureGuideVisual(plane);
+    const normal = new THREE.Vector3(plane.normal.x, plane.normal.y, plane.normal.z);
+    const basis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(plane.xAxis.x, plane.xAxis.y, plane.xAxis.z),
+      new THREE.Vector3(plane.yAxis.x, plane.yAxis.y, plane.yAxis.z),
+      normal,
+    );
+    mesh.position.set(
+      plane.origin.x + normal.x * surfaceOffset,
+      plane.origin.y + normal.y * surfaceOffset,
+      plane.origin.z + normal.z * surfaceOffset,
+    );
+    mesh.quaternion.setFromRotationMatrix(basis);
+    mesh.scale.set(plane.width, plane.height, 1);
+    mesh.visible = plane.visible;
+    mesh.updateMatrix();
+  }
+
+  function handleReferenceChange(referenceType, referenceId) {
+    if (referenceType === REFERENCE_TYPES.PLANE) {
+      const plane = references.getTracePlane(referenceId);
+      if (plane) updateGuideVisual(plane);
+    }
+    refreshStrokesForReference(referenceType, referenceId);
+  }
+
+  function createFaceGuide(hit) {
+    if (activeTracePlaneId) {
+      references.updateTracePlane(activeTracePlaneId, { visible: false });
+    }
+
+    const origin = pointValue(hit.position);
+    const normal = pointValue(hit.normal);
+    const axes = stablePlaneAxes(normal);
+    const size = guideSize();
+    const plane = references.createTracePlane({
+      origin,
+      normal,
+      xAxis: axes.xAxis,
+      yAxis: axes.yAxis,
+      width: size,
+      height: size,
+      visible: true,
+      locked: false,
+    });
+    tracePlaneOffsets.set(plane.id, { baseOrigin: origin, offset: 0 });
+    activeTracePlaneId = plane.id;
+    configureOffsetSlider();
+    setActiveDrawingSupport(REFERENCE_TYPES.PLANE, plane.id);
+    requestRender();
+  }
+
+  function setActiveGuideOffset(value) {
+    if (activeDrawingSupport.type !== REFERENCE_TYPES.PLANE) return;
+    const plane = references.getTracePlane(activeDrawingSupport.id);
+    const state = tracePlaneOffsets.get(activeDrawingSupport.id);
+    if (!plane || !state) return;
+
+    const offset = Number(value);
+    if (!Number.isFinite(offset)) return;
+    state.offset = offset;
+    references.updateTracePlane(plane.id, {
+      origin: {
+        x: state.baseOrigin.x + plane.normal.x * offset,
+        y: state.baseOrigin.y + plane.normal.y * offset,
+        z: state.baseOrigin.z + plane.normal.z * offset,
+      },
+    });
+    offsetOutput.value = offset.toFixed(3);
   }
 
   function updateActionState() {
@@ -107,11 +320,18 @@ if (modelViewer && viewerShell) {
     // 0.002% of the model diagonal avoids coincident surfaces without
     // visibly lifting the stroke away from the architecture.
     surfaceOffset = diagonal * 0.00002;
+    configureOffsetSlider();
+    for (const plane of references.listTracePlanes()) updateGuideVisual(plane);
     for (const stroke of strokes) rebuildStrokeGeometry(stroke);
     if (activeStroke) rebuildStrokeGeometry(activeStroke);
   }
 
-  function createStroke() {
+  function createRenderableStroke(referenceType, referenceId) {
+    const stroke = createStrokeRecord({
+      referenceType,
+      referenceId,
+      references,
+    });
     const capacity = 128;
     const positions = new Float32Array(capacity * 3);
     const geometry = new THREE.BufferGeometry();
@@ -121,40 +341,73 @@ if (modelViewer && viewerShell) {
     geometry.setDrawRange(0, 0);
 
     const line = new THREE.Line(geometry, strokeMaterial);
+    line.renderOrder = 2;
     line.frustumCulled = false;
     targetRoot.add(line);
-    return { points: [], capacity, positions, attribute, geometry, line };
+    strokeRenderStates.set(stroke.id, {
+      capacity,
+      positions,
+      attribute,
+      geometry,
+      line,
+    });
+    return stroke;
+  }
+
+  function createSurfaceStroke() {
+    return createRenderableStroke(
+      REFERENCE_TYPES.SURFACE,
+      PRIMARY_MODEL_SURFACE_ID,
+    );
+  }
+
+  function createActiveStroke() {
+    return createRenderableStroke(
+      activeDrawingSupport.type,
+      activeDrawingSupport.id,
+    );
+  }
+
+  function getStrokeRenderState(stroke) {
+    const renderState = strokeRenderStates.get(stroke.id);
+    if (!renderState) throw new Error(`Missing render state for stroke: ${stroke.id}`);
+    return renderState;
   }
 
   function ensureStrokeCapacity(stroke, pointCount) {
-    if (pointCount <= stroke.capacity) return;
-    let capacity = stroke.capacity;
+    const renderState = getStrokeRenderState(stroke);
+    if (pointCount <= renderState.capacity) return;
+    let capacity = renderState.capacity;
     while (capacity < pointCount) capacity *= 2;
 
     const positions = new Float32Array(capacity * 3);
-    positions.set(stroke.positions);
+    positions.set(renderState.positions);
     const attribute = new THREE.BufferAttribute(positions, 3);
     attribute.setUsage(THREE.DynamicDrawUsage);
-    stroke.capacity = capacity;
-    stroke.positions = positions;
-    stroke.attribute = attribute;
-    stroke.geometry.setAttribute("position", attribute);
+    renderState.capacity = capacity;
+    renderState.positions = positions;
+    renderState.attribute = attribute;
+    renderState.geometry.setAttribute("position", attribute);
   }
 
   function writeStrokePoint(stroke, index) {
     const point = stroke.points[index];
-    const { position, normal } = point;
-    const normalLength = Math.hypot(normal.x, normal.y, normal.z) || 1;
-    const offset = surfaceOffset / normalLength;
+    const position = resolveStrokePoint(stroke, point, references, {
+      surfaceOffset,
+      planeOffset: surfaceOffset * 2,
+    });
+    const renderState = getStrokeRenderState(stroke);
     const target = index * 3;
-    stroke.positions[target] = position.x + normal.x * offset;
-    stroke.positions[target + 1] = position.y + normal.y * offset;
-    stroke.positions[target + 2] = position.z + normal.z * offset;
+    renderState.positions[target] = position.x;
+    renderState.positions[target + 1] = position.y;
+    renderState.positions[target + 2] = position.z;
   }
 
   function updateStrokeDrawRange(stroke) {
-    stroke.geometry.setDrawRange(0, stroke.points.length);
-    stroke.attribute.needsUpdate = true;
+    const renderState = getStrokeRenderState(stroke);
+    renderState.geometry.setDrawRange(0, stroke.points.length);
+    renderState.attribute.needsUpdate = true;
+    renderState.line.visible = isStrokeReferenceVisible(stroke, references);
   }
 
   function appendStrokePoint(stroke, point) {
@@ -172,9 +425,30 @@ if (modelViewer && viewerShell) {
     updateStrokeDrawRange(stroke);
   }
 
+  function refreshStrokesForReference(referenceType, referenceId) {
+    for (const stroke of strokes) {
+      if (
+        stroke.referenceType === referenceType
+        && stroke.referenceId === referenceId
+      ) {
+        rebuildStrokeGeometry(stroke);
+      }
+    }
+    if (
+      activeStroke?.referenceType === referenceType
+      && activeStroke.referenceId === referenceId
+    ) {
+      rebuildStrokeGeometry(activeStroke);
+    }
+    requestRender();
+  }
+
   function disposeStroke(stroke) {
-    targetRoot.remove(stroke.line);
-    stroke.geometry.dispose();
+    const renderState = strokeRenderStates.get(stroke.id);
+    if (!renderState) return;
+    targetRoot.remove(renderState.line);
+    renderState.geometry.dispose();
+    strokeRenderStates.delete(stroke.id);
   }
 
   function syncCamera() {
@@ -289,13 +563,45 @@ if (modelViewer && viewerShell) {
     }
   }
 
+  function intersectTracePlane(sample, planeId) {
+    const plane = references.getTracePlane(planeId);
+    if (!plane || !plane.visible || !syncCamera()) return null;
+
+    const rect = viewerShell.getBoundingClientRect();
+    const pointer = new THREE.Vector2(
+      ((sample.clientX - rect.left) / rect.width) * 2 - 1,
+      -((sample.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(pointer, camera);
+    inverseTargetMatrix.copy(targetRoot.matrixWorld).invert();
+    rayInModelSpace.copy(raycaster.ray).applyMatrix4(inverseTargetMatrix);
+
+    const normal = new THREE.Vector3(plane.normal.x, plane.normal.y, plane.normal.z);
+    const origin = new THREE.Vector3(plane.origin.x, plane.origin.y, plane.origin.z);
+    intersectionPlane.setFromNormalAndCoplanarPoint(normal, origin);
+    const position = rayInModelSpace.intersectPlane(
+      intersectionPlane,
+      new THREE.Vector3(),
+    );
+    if (!position) return null;
+
+    const delta = position.clone().sub(origin);
+    const xAxis = new THREE.Vector3(plane.xAxis.x, plane.xAxis.y, plane.xAxis.z);
+    const yAxis = new THREE.Vector3(plane.yAxis.x, plane.yAxis.y, plane.yAxis.z);
+    const u = delta.dot(xAxis);
+    const v = delta.dot(yAxis);
+    if (Math.abs(u) > plane.width / 2 || Math.abs(v) > plane.height / 2) return null;
+
+    return { position, normal, u, v };
+  }
+
   function addLocalTestStroke() {
     const enabled = location.hostname === "localhost"
       && new URLSearchParams(location.search).has("sketch-test");
     if (!enabled) return;
 
     const rect = viewerShell.getBoundingClientRect();
-    const stroke = createStroke();
+    const stroke = createSurfaceStroke();
     for (let index = 0; index <= 36; index += 1) {
       const progress = index / 36;
       const clientX = rect.left + rect.width * (0.36 + progress * 0.28);
@@ -327,8 +633,78 @@ if (modelViewer && viewerShell) {
     requestRender();
   }
 
+  function addLocalGuideTest() {
+    const enabled = location.hostname === "localhost"
+      && new URLSearchParams(location.search).has("guide-test");
+    if (!enabled) return;
+
+    const rect = viewerShell.getBoundingClientRect();
+    const candidates = [
+      [0.5, 0.5],
+      [0.45, 0.5],
+      [0.55, 0.5],
+      [0.5, 0.45],
+      [0.5, 0.55],
+    ];
+    let guideHit = null;
+    for (const [xRatio, yRatio] of candidates) {
+      guideHit = hitTest({
+        clientX: rect.left + rect.width * xRatio,
+        clientY: rect.top + rect.height * yRatio,
+      });
+      if (guideHit) break;
+    }
+    if (!guideHit) {
+      canvas.dataset.localGuideTestPoints = "no-hit";
+      return;
+    }
+
+    createFaceGuide(guideHit);
+    const stroke = createActiveStroke();
+    for (let index = 0; index <= 24; index += 1) {
+      const progress = index / 24;
+      const sample = {
+        clientX: rect.left + rect.width * (0.43 + progress * 0.14),
+        clientY: rect.top + rect.height * (
+          0.5 + Math.sin(progress * Math.PI * 2) * 0.025
+        ),
+      };
+      const hit = intersectTracePlane(sample, activeTracePlaneId);
+      if (!hit) continue;
+      appendStrokePoint(stroke, {
+        u: hit.u,
+        v: hit.v,
+        pressure: 0.5,
+        tiltX: 0,
+        tiltY: 0,
+        timestamp: performance.now(),
+      });
+    }
+
+    if (stroke.points.length >= 2) {
+      strokes.push(stroke);
+      lastStrokePointCount = stroke.points.length;
+      canvas.dataset.localGuideTestPoints = String(stroke.points.length);
+      canvas.dataset.localGuideTestReference = stroke.referenceId;
+      updatePointCount();
+      updateActionState();
+    } else {
+      disposeStroke(stroke);
+      canvas.dataset.localGuideTestPoints = "0";
+    }
+    requestRender();
+  }
+
   function inspectPenSample(sample, { store = false } = {}) {
-    const hit = hitTest(sample);
+    const referenceType = store && activeStroke
+      ? activeStroke.referenceType
+      : activeDrawingSupport.type;
+    const referenceId = store && activeStroke
+      ? activeStroke.referenceId
+      : activeDrawingSupport.id;
+    const hit = referenceType === REFERENCE_TYPES.PLANE
+      ? intersectTracePlane(sample, referenceId)
+      : hitTest(sample);
     const pressure = Number(sample.pressure) || 0;
 
     debug.pointerType.textContent = "pen";
@@ -340,16 +716,21 @@ if (modelViewer && viewerShell) {
 
     if (!store || !hit || !activeStroke) return;
 
-    const point = {
-      position: pointValue(hit.position),
-      normal: pointValue(hit.normal),
+    const inputData = {
       pressure,
       tiltX: Number(sample.tiltX) || 0,
       tiltY: Number(sample.tiltY) || 0,
       timestamp: Number(sample.timeStamp),
     };
+    const point = referenceType === REFERENCE_TYPES.PLANE
+      ? { u: hit.u, v: hit.v, ...inputData }
+      : {
+          position: pointValue(hit.position),
+          normal: pointValue(hit.normal),
+          ...inputData,
+        };
     appendStrokePoint(activeStroke, point);
-    trackProjectionError(point.position, sample);
+    trackProjectionError(pointValue(hit.position), sample);
     updatePointCount();
   }
 
@@ -361,10 +742,22 @@ if (modelViewer && viewerShell) {
     return samples.length ? samples : [event];
   }
 
+  function selectGuideSurface(event) {
+    const hit = hitTest(event);
+    const pressure = Number(event.pressure) || 0;
+    debug.pointerType.textContent = "pen";
+    debug.hit.textContent = hit ? "yes" : "no";
+    debug.pressure.textContent = pressure.toFixed(3);
+    debug.xyz.textContent = hit
+      ? `${hit.position.x.toFixed(3)}, ${hit.position.y.toFixed(3)}, ${hit.position.z.toFixed(3)}`
+      : "—";
+    if (hit) createFaceGuide(hit);
+  }
+
   function beginPenStroke(event) {
     if (activePenId !== null) return;
     activePenId = event.pointerId;
-    activeStroke = createStroke();
+    activeStroke = createActiveStroke();
     debug.penActive.textContent = "yes";
     lastStrokePointCount = 0;
     updatePointCount();
@@ -408,12 +801,30 @@ if (modelViewer && viewerShell) {
     if (event.pointerType !== "pen") return;
     event.preventDefault();
     event.stopImmediatePropagation();
+
+    if (guideSelectionPending) {
+      guideSelectionPenId = event.pointerId;
+      try {
+        modelViewer.setPointerCapture(event.pointerId);
+      } catch {
+        // The selection still works when pointer capture is unavailable.
+      }
+      selectGuideSurface(event);
+      return;
+    }
+
     beginPenStroke(event);
   }
 
   function onPointerMove(event) {
     debug.pointerType.textContent = event.pointerType || "unknown";
     if (event.pointerType !== "pen") return;
+
+    if (event.pointerId === guideSelectionPenId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
 
     const isDrawing = event.pointerId === activePenId;
     if (isDrawing) {
@@ -427,6 +838,12 @@ if (modelViewer && viewerShell) {
   }
 
   function onPointerEnd(event) {
+    if (event.pointerId === guideSelectionPenId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      guideSelectionPenId = null;
+      return;
+    }
     if (event.pointerType !== "pen" || event.pointerId !== activePenId) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -459,6 +876,30 @@ if (modelViewer && viewerShell) {
     requestRender();
   });
 
+  modelSupportButton.addEventListener("click", () => {
+    setActiveDrawingSupport(
+      REFERENCE_TYPES.SURFACE,
+      PRIMARY_MODEL_SURFACE_ID,
+    );
+  });
+
+  guideSupportButton.addEventListener("click", () => {
+    if (!activeTracePlaneId) {
+      beginGuideSelection();
+      return;
+    }
+    const plane = references.getTracePlane(activeTracePlaneId);
+    if (plane && !plane.visible) {
+      references.updateTracePlane(activeTracePlaneId, { visible: true });
+    }
+    setActiveDrawingSupport(REFERENCE_TYPES.PLANE, activeTracePlaneId);
+  });
+
+  newGuideButton.addEventListener("click", beginGuideSelection);
+  offsetSlider.addEventListener("input", () => {
+    setActiveGuideOffset(offsetSlider.value);
+  });
+
   modelViewer.addEventListener("pointerdown", onPointerDown, { capture: true });
   modelViewer.addEventListener("pointermove", onPointerMove, { capture: true });
   modelViewer.addEventListener("pointerup", onPointerEnd, { capture: true });
@@ -471,6 +912,7 @@ if (modelViewer && viewerShell) {
     requestAnimationFrame(() => {
       validateCameraSync();
       addLocalTestStroke();
+      addLocalGuideTest();
     });
   });
 
@@ -478,22 +920,31 @@ if (modelViewer && viewerShell) {
   resizeObserver.observe(viewerShell);
   window.addEventListener("resize", resizeRenderer);
   document.addEventListener("fullscreenchange", resizeRenderer);
+  updateDrawingSupportUI();
   resizeRenderer();
 
-  // Read-only inspection hook for Sprint 01B validation.
+  const spatialInspection = Object.freeze({
+    getStrokes: () => structuredClone(strokes),
+    getTracePlanes: () => structuredClone(references.listTracePlanes()),
+    getActiveDrawingSupport: () => structuredClone(activeDrawingSupport),
+    getRendererState: () => ({
+      lastProjectionError,
+      maximumProjectionError,
+      modelDiagonal,
+      surfaceOffset,
+      strokeCount: strokes.length,
+      renderObjectCount: strokeRenderStates.size,
+      primarySurfaceReferenceId: PRIMARY_MODEL_SURFACE_ID,
+    }),
+  });
+
+  // Keep the previous inspection name for compatibility with Sprint 01B tests.
   Object.defineProperty(window, "__sketchSprint01B", {
     configurable: true,
-    value: {
-      getStrokes: () => structuredClone(
-        strokes.map((stroke) => ({ points: stroke.points })),
-      ),
-      getRendererState: () => ({
-        lastProjectionError,
-        maximumProjectionError,
-        modelDiagonal,
-        surfaceOffset,
-        strokeCount: strokes.length,
-      }),
-    },
+    value: spatialInspection,
+  });
+  Object.defineProperty(window, "__sketchSpatialModel", {
+    configurable: true,
+    value: spatialInspection,
   });
 }

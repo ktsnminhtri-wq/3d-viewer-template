@@ -44,6 +44,7 @@ const CORE_VISUAL_FILES = [
   "app.js",
   "sketch.css",
   "sketch-controller.js",
+  "sketch-spatial-model.js",
   "lighting-config.json",
   "preview-lighting-studio.css",
   "preview-lighting-studio.js",
