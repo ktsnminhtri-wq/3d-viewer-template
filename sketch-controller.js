@@ -23,7 +23,7 @@ if (modelViewer && viewerShell) {
   debugPanel.innerHTML = `
     <div class="sketch-debug__title">
       <strong>Pen hit test</strong>
-      <span class="sketch-debug__badge">Sprint 05</span>
+      <span class="sketch-debug__badge">Sprint 06</span>
     </div>
     <dl>
       <dt>pointer</dt><dd data-sketch-debug="pointerType">none</dd>
@@ -43,6 +43,10 @@ if (modelViewer && viewerShell) {
         <button type="button" data-sketch-support="plane" aria-pressed="false">Guide</button>
       </div>
       <button type="button" data-sketch-action="new-guide">New Guide</button>
+    </div>
+    <div class="sketch-guide-menu" data-guide-menu hidden>
+      <button type="button" data-guide-source="face">From Face</button>
+      <button type="button" data-guide-source="view">From View</button>
     </div>
     <p class="sketch-guide-instruction" data-guide-instruction hidden>Tap a surface</p>
     <label class="sketch-offset" data-guide-offset hidden>
@@ -90,6 +94,9 @@ if (modelViewer && viewerShell) {
   const modelSupportButton = debugPanel.querySelector('[data-sketch-support="surface"]');
   const guideSupportButton = debugPanel.querySelector('[data-sketch-support="plane"]');
   const guideInstruction = debugPanel.querySelector("[data-guide-instruction]");
+  const guideMenu = debugPanel.querySelector("[data-guide-menu]");
+  const fromFaceButton = debugPanel.querySelector('[data-guide-source="face"]');
+  const fromViewButton = debugPanel.querySelector('[data-guide-source="view"]');
   const offsetControl = debugPanel.querySelector("[data-guide-offset]");
   const offsetSlider = offsetControl.querySelector('input[type="range"]');
   const offsetOutput = offsetControl.querySelector("output");
@@ -101,13 +108,35 @@ if (modelViewer && viewerShell) {
     onReferenceChange: handleReferenceChange,
   });
   const guideGeometry = new THREE.PlaneGeometry(1, 1);
-  const guideMaterial = new THREE.MeshBasicMaterial({
-    color: 0x8fc9e8,
+  const guideMaterial = new THREE.ShaderMaterial({
     depthTest: true,
     depthWrite: false,
-    opacity: 0.14,
     side: THREE.DoubleSide,
     transparent: true,
+    uniforms: {
+      guideColor: { value: new THREE.Color(0x8fc9e8) },
+      guideOpacity: { value: 0.14 },
+    },
+    vertexShader: `
+      varying vec2 guideUv;
+      void main() {
+        guideUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 guideColor;
+      uniform float guideOpacity;
+      varying vec2 guideUv;
+      void main() {
+        float edgeDistance = min(
+          min(guideUv.x, 1.0 - guideUv.x),
+          min(guideUv.y, 1.0 - guideUv.y)
+        );
+        float edgeFade = smoothstep(0.0, 0.16, edgeDistance);
+        gl_FragColor = vec4(guideColor, guideOpacity * edgeFade);
+      }
+    `,
   });
   const raycaster = new THREE.Raycaster();
   const rayInModelSpace = new THREE.Ray();
@@ -121,6 +150,7 @@ if (modelViewer && viewerShell) {
   let activePenId = null;
   let guideSelectionPenId = null;
   let guideSelectionPending = false;
+  let pendingGuideSourceType = null;
   let activeTracePlaneId = null;
   let lastStrokePointCount = 0;
   let resumeAutoRotate = false;
@@ -144,6 +174,8 @@ if (modelViewer && viewerShell) {
     activeDrawingSupport.type = type;
     activeDrawingSupport.id = id;
     guideSelectionPending = false;
+    pendingGuideSourceType = null;
+    guideMenu.hidden = true;
     updateDrawingSupportUI();
     return true;
   }
@@ -162,8 +194,24 @@ if (modelViewer && viewerShell) {
     offsetOutput.value = state.offset.toFixed(3);
   }
 
-  function beginGuideSelection() {
+  function toggleGuideCreationMenu() {
+    guideSelectionPending = false;
+    pendingGuideSourceType = null;
+    guideInstruction.hidden = true;
+    const opening = guideMenu.hidden;
+    guideMenu.hidden = !opening;
+    offsetControl.hidden = opening
+      || activeDrawingSupport.type !== REFERENCE_TYPES.PLANE;
+  }
+
+  function beginGuideSelection(sourceType) {
+    if (sourceType !== "face" && sourceType !== "view") return;
     guideSelectionPending = true;
+    pendingGuideSourceType = sourceType;
+    guideMenu.hidden = true;
+    guideInstruction.textContent = sourceType === "view"
+      ? "Tap a surface · From View"
+      : "Tap a surface · From Face";
     guideInstruction.hidden = false;
     offsetControl.hidden = true;
   }
@@ -214,6 +262,34 @@ if (modelViewer && viewerShell) {
     return { xAxis: pointValue(xAxis), yAxis: pointValue(yAxis) };
   }
 
+  function viewPlaneFrame() {
+    if (!syncCamera()) return null;
+    inverseTargetMatrix.copy(targetRoot.matrixWorld).invert();
+
+    const cameraForward = camera.getWorldDirection(new THREE.Vector3())
+      .transformDirection(inverseTargetMatrix);
+    const normal = cameraForward.negate().normalize();
+    const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
+      .transformDirection(inverseTargetMatrix);
+    const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1)
+      .transformDirection(inverseTargetMatrix);
+
+    cameraRight.addScaledVector(normal, -cameraRight.dot(normal));
+    if (cameraRight.lengthSq() <= 1e-8) return null;
+    const xAxis = cameraRight.normalize();
+    const yAxis = new THREE.Vector3().crossVectors(normal, xAxis).normalize();
+    if (yAxis.dot(cameraUp) < 0) {
+      xAxis.negate();
+      yAxis.crossVectors(normal, xAxis).normalize();
+    }
+
+    return {
+      normal: pointValue(normal),
+      xAxis: pointValue(xAxis),
+      yAxis: pointValue(yAxis),
+    };
+  }
+
   function ensureGuideVisual(plane) {
     let mesh = guideVisuals.get(plane.id);
     if (!mesh) {
@@ -253,30 +329,31 @@ if (modelViewer && viewerShell) {
     refreshStrokesForReference(referenceType, referenceId);
   }
 
-  function createFaceGuide(hit) {
-    if (activeTracePlaneId) {
-      references.updateTracePlane(activeTracePlaneId, { visible: false });
-    }
-
+  function createGuideFromHit(hit, sourceType) {
     const origin = pointValue(hit.position);
-    const normal = pointValue(hit.normal);
-    const axes = stablePlaneAxes(normal);
+    const faceNormal = pointValue(hit.normal);
+    const frame = sourceType === "view"
+      ? viewPlaneFrame()
+      : { normal: faceNormal, ...stablePlaneAxes(faceNormal) };
+    if (!frame) return false;
     const size = guideSize();
     const plane = references.createTracePlane({
       origin,
-      normal,
-      xAxis: axes.xAxis,
-      yAxis: axes.yAxis,
+      normal: frame.normal,
+      xAxis: frame.xAxis,
+      yAxis: frame.yAxis,
       width: size,
       height: size,
       visible: true,
       locked: false,
+      sourceType,
     });
     tracePlaneOffsets.set(plane.id, { baseOrigin: origin, offset: 0 });
     activeTracePlaneId = plane.id;
     configureOffsetSlider();
     setActiveDrawingSupport(REFERENCE_TYPES.PLANE, plane.id);
     requestRender();
+    return true;
   }
 
   function setActiveGuideOffset(value) {
@@ -590,8 +667,6 @@ if (modelViewer && viewerShell) {
     const yAxis = new THREE.Vector3(plane.yAxis.x, plane.yAxis.y, plane.yAxis.z);
     const u = delta.dot(xAxis);
     const v = delta.dot(yAxis);
-    if (Math.abs(u) > plane.width / 2 || Math.abs(v) > plane.height / 2) return null;
-
     return { position, normal, u, v };
   }
 
@@ -634,9 +709,10 @@ if (modelViewer && viewerShell) {
   }
 
   function addLocalGuideTest() {
-    const enabled = location.hostname === "localhost"
-      && new URLSearchParams(location.search).has("guide-test");
+    const params = new URLSearchParams(location.search);
+    const enabled = location.hostname === "localhost" && params.has("guide-test");
     if (!enabled) return;
+    const sourceType = params.get("guide-test") === "view" ? "view" : "face";
 
     const rect = viewerShell.getBoundingClientRect();
     const candidates = [
@@ -659,18 +735,29 @@ if (modelViewer && viewerShell) {
       return;
     }
 
-    createFaceGuide(guideHit);
+    if (!createGuideFromHit(guideHit, sourceType)) {
+      canvas.dataset.localGuideTestPoints = "frame-error";
+      return;
+    }
     const stroke = createActiveStroke();
+    let outsidePreviewPoints = 0;
     for (let index = 0; index <= 24; index += 1) {
       const progress = index / 24;
       const sample = {
-        clientX: rect.left + rect.width * (0.43 + progress * 0.14),
+        clientX: rect.left + rect.width * (0.18 + progress * 0.64),
         clientY: rect.top + rect.height * (
-          0.5 + Math.sin(progress * Math.PI * 2) * 0.025
+          0.5 + Math.sin(progress * Math.PI * 2) * 0.045
         ),
       };
       const hit = intersectTracePlane(sample, activeTracePlaneId);
       if (!hit) continue;
+      const plane = references.getTracePlane(activeTracePlaneId);
+      if (
+        Math.abs(hit.u) > plane.width / 2
+        || Math.abs(hit.v) > plane.height / 2
+      ) {
+        outsidePreviewPoints += 1;
+      }
       appendStrokePoint(stroke, {
         u: hit.u,
         v: hit.v,
@@ -686,6 +773,8 @@ if (modelViewer && viewerShell) {
       lastStrokePointCount = stroke.points.length;
       canvas.dataset.localGuideTestPoints = String(stroke.points.length);
       canvas.dataset.localGuideTestReference = stroke.referenceId;
+      canvas.dataset.localGuideTestSource = sourceType;
+      canvas.dataset.localGuideOutsidePoints = String(outsidePreviewPoints);
       updatePointCount();
       updateActionState();
     } else {
@@ -751,7 +840,7 @@ if (modelViewer && viewerShell) {
     debug.xyz.textContent = hit
       ? `${hit.position.x.toFixed(3)}, ${hit.position.y.toFixed(3)}, ${hit.position.z.toFixed(3)}`
       : "—";
-    if (hit) createFaceGuide(hit);
+    if (hit) createGuideFromHit(hit, pendingGuideSourceType || "face");
   }
 
   function beginPenStroke(event) {
@@ -885,7 +974,7 @@ if (modelViewer && viewerShell) {
 
   guideSupportButton.addEventListener("click", () => {
     if (!activeTracePlaneId) {
-      beginGuideSelection();
+      toggleGuideCreationMenu();
       return;
     }
     const plane = references.getTracePlane(activeTracePlaneId);
@@ -895,7 +984,9 @@ if (modelViewer && viewerShell) {
     setActiveDrawingSupport(REFERENCE_TYPES.PLANE, activeTracePlaneId);
   });
 
-  newGuideButton.addEventListener("click", beginGuideSelection);
+  newGuideButton.addEventListener("click", toggleGuideCreationMenu);
+  fromFaceButton.addEventListener("click", () => beginGuideSelection("face"));
+  fromViewButton.addEventListener("click", () => beginGuideSelection("view"));
   offsetSlider.addEventListener("input", () => {
     setActiveGuideOffset(offsetSlider.value);
   });

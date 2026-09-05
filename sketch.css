@@ -126,6 +126,24 @@
   padding-inline: 10px;
 }
 
+.sketch-guide-menu {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgb(15 17 16 / 38%);
+}
+
+.sketch-guide-menu[hidden] {
+  display: none;
+}
+
+.sketch-guide-menu button {
+  min-height: 36px;
+}
+
 .sketch-guide-instruction {
   margin: 8px 0 0;
   color: #acd7ff;

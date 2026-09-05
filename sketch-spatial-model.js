@@ -6,6 +6,7 @@ export const REFERENCE_TYPES = Object.freeze({
 // model-viewer returns hit position + normal, but no stable mesh/primitive ID.
 // Surface strokes therefore reference the loaded model's local coordinate space.
 export const PRIMARY_MODEL_SURFACE_ID = "surface:model.glb";
+const GUIDE_SOURCE_TYPES = new Set(["face", "view"]);
 
 let nextLocalId = 1;
 
@@ -90,6 +91,7 @@ export function createSpatialReferenceStore({ onReferenceChange = () => {} } = {
     height,
     visible = true,
     locked = false,
+    sourceType = "face",
   }) {
     if (surfaceReferences.has(id) || tracePlanes.has(id)) {
       throw new Error(`Spatial reference already exists: ${id}`);
@@ -105,11 +107,15 @@ export function createSpatialReferenceStore({ onReferenceChange = () => {} } = {
       height: finiteNumber(height, "height"),
       visible: Boolean(visible),
       locked: Boolean(locked),
+      sourceType,
     };
     if (plane.width <= 0 || plane.height <= 0) {
       throw new RangeError("Trace Plane width and height must be greater than zero.");
     }
     validatePlaneBasis(plane);
+    if (!GUIDE_SOURCE_TYPES.has(plane.sourceType)) {
+      throw new TypeError(`Unsupported Trace Plane sourceType: ${plane.sourceType}`);
+    }
 
     tracePlanes.set(id, plane);
     onReferenceChange(REFERENCE_TYPES.PLANE, id);
@@ -129,11 +135,15 @@ export function createSpatialReferenceStore({ onReferenceChange = () => {} } = {
       ...(changes.height === undefined ? {} : { height: finiteNumber(changes.height, "height") }),
       ...(changes.visible === undefined ? {} : { visible: Boolean(changes.visible) }),
       ...(changes.locked === undefined ? {} : { locked: Boolean(changes.locked) }),
+      ...(changes.sourceType === undefined ? {} : { sourceType: changes.sourceType }),
     };
     if (next.width <= 0 || next.height <= 0) {
       throw new RangeError("Trace Plane width and height must be greater than zero.");
     }
     validatePlaneBasis(next);
+    if (!GUIDE_SOURCE_TYPES.has(next.sourceType)) {
+      throw new TypeError(`Unsupported Trace Plane sourceType: ${next.sourceType}`);
+    }
     tracePlanes.set(id, next);
     onReferenceChange(REFERENCE_TYPES.PLANE, id);
     return next;
