@@ -6,7 +6,10 @@ export const REFERENCE_TYPES = Object.freeze({
 // model-viewer returns hit position + normal, but no stable mesh/primitive ID.
 // Surface strokes therefore reference the loaded model's local coordinate space.
 export const PRIMARY_MODEL_SURFACE_ID = "surface:model.glb";
-const GUIDE_SOURCE_TYPES = new Set(["face", "view"]);
+// "view" remains accepted for compatibility with guides created by Sprint 06.
+// New view-derived guides use "draw" because their in-plane direction comes
+// from an explicit S Pen gesture rather than a one-point camera snapshot.
+const GUIDE_SOURCE_TYPES = new Set(["face", "draw", "view"]);
 
 let nextLocalId = 1;
 

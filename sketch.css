@@ -150,6 +150,17 @@
   text-align: center;
 }
 
+.sketch-constraint-hint {
+  width: max-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgb(172 215 255 / 13%);
+  color: #cfe8ff;
+  text-align: center;
+}
+
 .sketch-offset {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 44px;
@@ -160,7 +171,8 @@
 }
 
 .sketch-offset[hidden],
-.sketch-guide-instruction[hidden] {
+.sketch-guide-instruction[hidden],
+.sketch-constraint-hint[hidden] {
   display: none;
 }
 

@@ -23,7 +23,7 @@ if (modelViewer && viewerShell) {
   debugPanel.innerHTML = `
     <div class="sketch-debug__title">
       <strong>Pen hit test</strong>
-      <span class="sketch-debug__badge">Sprint 06</span>
+      <span class="sketch-debug__badge">Sprint 07</span>
     </div>
     <dl>
       <dt>pointer</dt><dd data-sketch-debug="pointerType">none</dd>
@@ -46,9 +46,10 @@ if (modelViewer && viewerShell) {
     </div>
     <div class="sketch-guide-menu" data-guide-menu hidden>
       <button type="button" data-guide-source="face">From Face</button>
-      <button type="button" data-guide-source="view">From View</button>
+      <button type="button" data-guide-source="draw">Draw Guide</button>
     </div>
     <p class="sketch-guide-instruction" data-guide-instruction hidden>Tap a surface</p>
+    <p class="sketch-constraint-hint" data-constraint-hint hidden></p>
     <label class="sketch-offset" data-guide-offset hidden>
       <span>Offset</span>
       <input type="range" min="-1" max="1" step="0.01" value="0" />
@@ -96,7 +97,7 @@ if (modelViewer && viewerShell) {
   const guideInstruction = debugPanel.querySelector("[data-guide-instruction]");
   const guideMenu = debugPanel.querySelector("[data-guide-menu]");
   const fromFaceButton = debugPanel.querySelector('[data-guide-source="face"]');
-  const fromViewButton = debugPanel.querySelector('[data-guide-source="view"]');
+  const drawGuideButton = debugPanel.querySelector('[data-guide-source="draw"]');
   const offsetControl = debugPanel.querySelector("[data-guide-offset]");
   const offsetSlider = offsetControl.querySelector('input[type="range"]');
   const offsetOutput = offsetControl.querySelector("output");
@@ -138,6 +139,39 @@ if (modelViewer && viewerShell) {
       }
     `,
   });
+  const guideDraftMaterial = new THREE.LineDashedMaterial({
+    color: 0xb9e2ff,
+    dashSize: 0.03,
+    depthTest: false,
+    depthWrite: false,
+    gapSize: 0.018,
+    opacity: 0.9,
+    transparent: true,
+  });
+  const guideDraftGeometry = new THREE.BufferGeometry();
+  const guideDraftRenderState = {
+    capacity: 128,
+    positions: new Float32Array(128 * 3),
+    distances: new Float32Array(128),
+  };
+  guideDraftRenderState.positionAttribute = new THREE.BufferAttribute(
+    guideDraftRenderState.positions,
+    3,
+  );
+  guideDraftRenderState.distanceAttribute = new THREE.BufferAttribute(
+    guideDraftRenderState.distances,
+    1,
+  );
+  guideDraftRenderState.positionAttribute.setUsage(THREE.DynamicDrawUsage);
+  guideDraftRenderState.distanceAttribute.setUsage(THREE.DynamicDrawUsage);
+  guideDraftGeometry.setAttribute("position", guideDraftRenderState.positionAttribute);
+  guideDraftGeometry.setAttribute("lineDistance", guideDraftRenderState.distanceAttribute);
+  guideDraftGeometry.setDrawRange(0, 0);
+  const guideDraftLine = new THREE.Line(guideDraftGeometry, guideDraftMaterial);
+  guideDraftLine.frustumCulled = false;
+  guideDraftLine.renderOrder = 3;
+  guideDraftLine.visible = false;
+  targetRoot.add(guideDraftLine);
   const raycaster = new THREE.Raycaster();
   const rayInModelSpace = new THREE.Ray();
   const intersectionPlane = new THREE.Plane();
@@ -151,6 +185,7 @@ if (modelViewer && viewerShell) {
   let guideSelectionPenId = null;
   let guideSelectionPending = false;
   let pendingGuideSourceType = null;
+  let guideDraft = null;
   let activeTracePlaneId = null;
   let lastStrokePointCount = 0;
   let resumeAutoRotate = false;
@@ -160,6 +195,21 @@ if (modelViewer && viewerShell) {
   let lastProjectionError = null;
   let maximumProjectionError = 0;
   const tracePlaneOffsets = new Map();
+  const constraintHint = debugPanel.querySelector("[data-constraint-hint]");
+  const suppressedTouchIds = new Set();
+  const touchTapCandidates = new Map();
+  const penRawHistory = [];
+  const directionConstraint = {
+    touchId: null,
+    timer: null,
+    active: false,
+    axis: null,
+    baseline: null,
+    startX: 0,
+    startY: 0,
+  };
+  let lastGuideTap = null;
+  let transientMessageTimer = null;
 
   function pointValue(vector) {
     return {
@@ -171,6 +221,7 @@ if (modelViewer && viewerShell) {
 
   function setActiveDrawingSupport(type, id) {
     if (!references.hasReference(type, id)) return false;
+    clearGuideDraft();
     activeDrawingSupport.type = type;
     activeDrawingSupport.id = id;
     guideSelectionPending = false;
@@ -178,6 +229,20 @@ if (modelViewer && viewerShell) {
     guideMenu.hidden = true;
     updateDrawingSupportUI();
     return true;
+  }
+
+  function showGuideMessage(message, { transient = false } = {}) {
+    if (transientMessageTimer) {
+      clearTimeout(transientMessageTimer);
+      transientMessageTimer = null;
+    }
+    guideInstruction.textContent = message;
+    guideInstruction.hidden = false;
+    if (!transient) return;
+    transientMessageTimer = setTimeout(() => {
+      if (!guideSelectionPending) guideInstruction.hidden = true;
+      transientMessageTimer = null;
+    }, 1400);
   }
 
   function updateDrawingSupportUI() {
@@ -195,6 +260,7 @@ if (modelViewer && viewerShell) {
   }
 
   function toggleGuideCreationMenu() {
+    clearGuideDraft();
     guideSelectionPending = false;
     pendingGuideSourceType = null;
     guideInstruction.hidden = true;
@@ -205,14 +271,14 @@ if (modelViewer && viewerShell) {
   }
 
   function beginGuideSelection(sourceType) {
-    if (sourceType !== "face" && sourceType !== "view") return;
+    if (sourceType !== "face" && sourceType !== "draw") return;
+    clearGuideDraft();
     guideSelectionPending = true;
     pendingGuideSourceType = sourceType;
     guideMenu.hidden = true;
-    guideInstruction.textContent = sourceType === "view"
-      ? "Tap a surface · From View"
-      : "Tap a surface · From Face";
-    guideInstruction.hidden = false;
+    showGuideMessage(sourceType === "draw"
+      ? "Start on model · Draw one line"
+      : "Tap a surface · From Face");
     offsetControl.hidden = true;
   }
 
@@ -290,6 +356,167 @@ if (modelViewer && viewerShell) {
     };
   }
 
+  function clearGuideDraft() {
+    guideDraft = null;
+    guideDraftLine.visible = false;
+    guideDraftGeometry.setDrawRange(0, 0);
+    canvas.dataset.guideDraftPoints = "0";
+    canvas.dataset.guideDraftVisible = "false";
+  }
+
+  function ensureGuideDraftCapacity(pointCount) {
+    if (pointCount <= guideDraftRenderState.capacity) return;
+    let capacity = guideDraftRenderState.capacity;
+    while (capacity < pointCount) capacity *= 2;
+    const positions = new Float32Array(capacity * 3);
+    const distances = new Float32Array(capacity);
+    positions.set(guideDraftRenderState.positions);
+    distances.set(guideDraftRenderState.distances);
+    guideDraftRenderState.capacity = capacity;
+    guideDraftRenderState.positions = positions;
+    guideDraftRenderState.distances = distances;
+    guideDraftRenderState.positionAttribute = new THREE.BufferAttribute(positions, 3);
+    guideDraftRenderState.distanceAttribute = new THREE.BufferAttribute(distances, 1);
+    guideDraftRenderState.positionAttribute.setUsage(THREE.DynamicDrawUsage);
+    guideDraftRenderState.distanceAttribute.setUsage(THREE.DynamicDrawUsage);
+    guideDraftGeometry.setAttribute("position", guideDraftRenderState.positionAttribute);
+    guideDraftGeometry.setAttribute("lineDistance", guideDraftRenderState.distanceAttribute);
+  }
+
+  function updateGuideDraftVisual() {
+    const pointCount = guideDraft?.points.length ?? 0;
+    if (!pointCount) {
+      guideDraftLine.visible = false;
+      guideDraftGeometry.setDrawRange(0, 0);
+      return;
+    }
+
+    ensureGuideDraftCapacity(pointCount);
+    const index = pointCount - 1;
+    const point = guideDraft.points[index];
+    const positionIndex = index * 3;
+    guideDraftRenderState.positions[positionIndex] = point.x;
+    guideDraftRenderState.positions[positionIndex + 1] = point.y;
+    guideDraftRenderState.positions[positionIndex + 2] = point.z;
+    guideDraftRenderState.distances[index] = index === 0
+      ? 0
+      : guideDraftRenderState.distances[index - 1]
+        + point.distanceTo(guideDraft.points[index - 1]);
+    guideDraftRenderState.positionAttribute.needsUpdate = true;
+    guideDraftRenderState.distanceAttribute.needsUpdate = true;
+    guideDraftGeometry.setDrawRange(0, pointCount);
+    guideDraftLine.visible = pointCount > 1;
+    canvas.dataset.guideDraftPoints = String(pointCount);
+    canvas.dataset.guideDraftVisible = String(guideDraftLine.visible);
+    requestRender();
+  }
+
+  function appendGuideDraftSample(sample) {
+    if (!guideDraft) return false;
+    const hit = intersectPlaneFrame(sample, guideDraft.frame);
+    if (!hit) return false;
+    const lastPoint = guideDraft.points.at(-1);
+    const minimumSpacing = Math.max(modelDiagonal * 0.00015, 0.00001);
+    if (lastPoint && hit.position.distanceToSquared(lastPoint) < minimumSpacing ** 2) {
+      return false;
+    }
+    guideDraft.points.push(hit.position);
+    guideDraft.endClientX = sample.clientX;
+    guideDraft.endClientY = sample.clientY;
+    updateGuideDraftVisual();
+    return true;
+  }
+
+  function beginDrawGuideDraft(event) {
+    const anchorHit = hitTest(event);
+    if (!anchorHit) {
+      showGuideMessage("Start on model");
+      return false;
+    }
+    const frame = viewPlaneFrame();
+    if (!frame) {
+      showGuideMessage("Camera unavailable");
+      return false;
+    }
+
+    const anchor = new THREE.Vector3(
+      anchorHit.position.x,
+      anchorHit.position.y,
+      anchorHit.position.z,
+    );
+    guideDraft = {
+      pointerId: event.pointerId,
+      frame: { ...frame, origin: pointValue(anchor) },
+      points: [anchor],
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      endClientX: event.clientX,
+      endClientY: event.clientY,
+    };
+    guideSelectionPenId = event.pointerId;
+    guideDraftMaterial.dashSize = Math.max(modelDiagonal * 0.012, 0.002);
+    guideDraftMaterial.gapSize = Math.max(modelDiagonal * 0.007, 0.001);
+    showGuideMessage("Draw one guide line");
+    updateGuideDraftVisual();
+    return true;
+  }
+
+  function createGuideFromDrawGesture(draft) {
+    if (!draft || draft.points.length < 2) return false;
+    const start = draft.points[0];
+    const end = draft.points.at(-1);
+    const screenLength = Math.hypot(
+      draft.endClientX - draft.startClientX,
+      draft.endClientY - draft.startClientY,
+    );
+    const normal = new THREE.Vector3(
+      draft.frame.normal.x,
+      draft.frame.normal.y,
+      draft.frame.normal.z,
+    ).normalize();
+    const xAxis = end.clone().sub(start);
+    xAxis.addScaledVector(normal, -xAxis.dot(normal));
+    if (screenLength < 14 || xAxis.length() < Math.max(modelDiagonal * 0.002, 0.0001)) {
+      return false;
+    }
+    xAxis.normalize();
+    const yAxis = new THREE.Vector3().crossVectors(normal, xAxis).normalize();
+
+    const origin = pointValue(start);
+    const size = guideSize();
+    const plane = references.createTracePlane({
+      origin,
+      normal: pointValue(normal),
+      xAxis: pointValue(xAxis),
+      yAxis: pointValue(yAxis),
+      width: size,
+      height: size,
+      visible: true,
+      locked: false,
+      sourceType: "draw",
+    });
+    tracePlaneOffsets.set(plane.id, { baseOrigin: origin, offset: 0 });
+    activeTracePlaneId = plane.id;
+    configureOffsetSlider();
+    setActiveDrawingSupport(REFERENCE_TYPES.PLANE, plane.id);
+    requestRender();
+    return true;
+  }
+
+  function finishDrawGuideDraft(event) {
+    if (!guideDraft || event.pointerId !== guideDraft.pointerId) return false;
+    if (event.type === "pointerup") appendGuideDraftSample(event);
+    const completedDraft = guideDraft;
+    guideDraftLine.visible = false;
+    guideDraftGeometry.setDrawRange(0, 0);
+    guideDraft = null;
+    if (!createGuideFromDrawGesture(completedDraft)) {
+      showGuideMessage("Draw a longer line");
+      return false;
+    }
+    return true;
+  }
+
   function ensureGuideVisual(plane) {
     let mesh = guideVisuals.get(plane.id);
     if (!mesh) {
@@ -329,13 +556,10 @@ if (modelViewer && viewerShell) {
     refreshStrokesForReference(referenceType, referenceId);
   }
 
-  function createGuideFromHit(hit, sourceType) {
+  function createFaceGuideFromHit(hit) {
     const origin = pointValue(hit.position);
     const faceNormal = pointValue(hit.normal);
-    const frame = sourceType === "view"
-      ? viewPlaneFrame()
-      : { normal: faceNormal, ...stablePlaneAxes(faceNormal) };
-    if (!frame) return false;
+    const frame = { normal: faceNormal, ...stablePlaneAxes(faceNormal) };
     const size = guideSize();
     const plane = references.createTracePlane({
       origin,
@@ -346,7 +570,7 @@ if (modelViewer && viewerShell) {
       height: size,
       visible: true,
       locked: false,
-      sourceType,
+      sourceType: "face",
     });
     tracePlaneOffsets.set(plane.id, { baseOrigin: origin, offset: 0 });
     activeTracePlaneId = plane.id;
@@ -640,10 +864,8 @@ if (modelViewer && viewerShell) {
     }
   }
 
-  function intersectTracePlane(sample, planeId) {
-    const plane = references.getTracePlane(planeId);
-    if (!plane || !plane.visible || !syncCamera()) return null;
-
+  function intersectPlaneFrame(sample, plane) {
+    if (!plane || !syncCamera()) return null;
     const rect = viewerShell.getBoundingClientRect();
     const pointer = new THREE.Vector2(
       ((sample.clientX - rect.left) / rect.width) * 2 - 1,
@@ -668,6 +890,215 @@ if (modelViewer && viewerShell) {
     const u = delta.dot(xAxis);
     const v = delta.dot(yAxis);
     return { position, normal, u, v };
+  }
+
+  function intersectTracePlane(sample, planeId) {
+    const plane = references.getTracePlane(planeId);
+    if (!plane || !plane.visible) return null;
+    return intersectPlaneFrame(sample, plane);
+  }
+
+  function guidePreviewContains(hit, plane) {
+    return Boolean(
+      hit
+      && plane
+      && Math.abs(hit.u) <= plane.width / 2
+      && Math.abs(hit.v) <= plane.height / 2
+    );
+  }
+
+  function alignCameraToGuide(focusPoint) {
+    if (
+      activeDrawingSupport.type !== REFERENCE_TYPES.PLANE
+      || !activeDrawingSupport.id
+      || !syncCamera()
+    ) return false;
+    const plane = references.getTracePlane(activeDrawingSupport.id);
+    const orbit = modelViewer.getCameraOrbit?.();
+    if (!plane || !orbit) return false;
+
+    const direction = new THREE.Vector3(
+      plane.normal.x,
+      plane.normal.y,
+      plane.normal.z,
+    ).applyAxisAngle(new THREE.Vector3(0, 1, 0), turntableRoot.rotation.y).normalize();
+    const currentCameraDirection = camera.position.clone().normalize();
+    if (direction.dot(currentCameraDirection) < 0) direction.negate();
+
+    const twoPointMode = document.querySelector("#twoPointButton")
+      ?.getAttribute("aria-pressed") === "true";
+    if (twoPointMode) {
+      direction.y = 0;
+      if (direction.lengthSq() <= 1e-8) {
+        showGuideMessage("Use 3P for this Guide", { transient: true });
+        return false;
+      }
+      direction.normalize();
+    }
+
+    const spherical = new THREE.Spherical().setFromVector3(
+      direction.multiplyScalar(orbit.radius),
+    );
+    const focus = focusPoint || plane.origin;
+    if (modelViewer.hasAttribute("auto-rotate")) {
+      document.querySelector("#rotateButton")?.click();
+    }
+    modelViewer.cameraTarget = `${focus.x}m ${focus.y}m ${focus.z}m`;
+    modelViewer.cameraOrbit = `${spherical.theta}rad ${spherical.phi}rad ${orbit.radius}m`;
+    showGuideMessage("View aligned", { transient: true });
+    requestRender();
+    return true;
+  }
+
+  function registerGuideTap(candidate) {
+    if (activeDrawingSupport.type !== REFERENCE_TYPES.PLANE) return;
+    const plane = references.getTracePlane(activeDrawingSupport.id);
+    const hit = intersectTracePlane(candidate, activeDrawingSupport.id);
+    if (!guidePreviewContains(hit, plane)) {
+      lastGuideTap = null;
+      return;
+    }
+
+    const now = performance.now();
+    if (
+      lastGuideTap
+      && now - lastGuideTap.time <= 360
+      && Math.hypot(
+        candidate.clientX - lastGuideTap.clientX,
+        candidate.clientY - lastGuideTap.clientY,
+      ) <= 36
+    ) {
+      lastGuideTap = null;
+      alignCameraToGuide(pointValue(hit.position));
+      return;
+    }
+    lastGuideTap = {
+      time: now,
+      clientX: candidate.clientX,
+      clientY: candidate.clientY,
+    };
+  }
+
+  function clearConstraintTimer() {
+    if (directionConstraint.timer) clearTimeout(directionConstraint.timer);
+    directionConstraint.timer = null;
+  }
+
+  function constraintAxisFromHistory() {
+    if (penRawHistory.length < 2 || !activeStroke) return null;
+    const latest = penRawHistory.at(-1);
+    const earlier = penRawHistory[Math.max(0, penRawHistory.length - 7)];
+    const threshold = Math.cos(35 * Math.PI / 180);
+
+    if (activeStroke.referenceType === REFERENCE_TYPES.PLANE) {
+      const du = latest.u - earlier.u;
+      const dv = latest.v - earlier.v;
+      const length = Math.hypot(du, dv);
+      if (length <= Math.max(modelDiagonal * 0.0002, 0.00001)) return null;
+      const xScore = Math.abs(du) / length;
+      const yScore = Math.abs(dv) / length;
+      const score = Math.max(xScore, yScore);
+      if (score < threshold) return null;
+      return xScore >= yScore ? "guide-x" : "guide-y";
+    }
+
+    const delta = new THREE.Vector3(
+      latest.position.x - earlier.position.x,
+      latest.position.y - earlier.position.y,
+      latest.position.z - earlier.position.z,
+    );
+    const length = delta.length();
+    if (length <= Math.max(modelDiagonal * 0.0002, 0.00001)) return null;
+    const scores = [
+      ["world-y", Math.abs(delta.y) / length],
+      ["world-x", Math.abs(delta.x) / length],
+      ["world-z", Math.abs(delta.z) / length],
+    ].sort((a, b) => b[1] - a[1]);
+    return scores[0][1] >= threshold ? scores[0][0] : null;
+  }
+
+  function constraintLabel(axis) {
+    if (axis === "guide-x") return "Along guide";
+    if (axis === "guide-y") return "Across guide";
+    if (axis === "world-y") return "Vertical";
+    if (axis === "world-x" || axis === "world-z") return "Horizontal";
+    return "Hold · move near a direction";
+  }
+
+  function updateConstraintHint() {
+    constraintHint.hidden = !directionConstraint.active;
+    if (directionConstraint.active) {
+      constraintHint.textContent = constraintLabel(directionConstraint.axis);
+    }
+  }
+
+  function activateDirectionConstraint() {
+    directionConstraint.timer = null;
+    if (
+      directionConstraint.touchId === null
+      || !activeStroke
+      || activePenId === null
+      || !activeStroke.points.length
+    ) return;
+    directionConstraint.active = true;
+    directionConstraint.axis = constraintAxisFromHistory();
+    directionConstraint.baseline = structuredClone(activeStroke.points.at(-1));
+    updateConstraintHint();
+  }
+
+  function beginDirectionConstraint(event) {
+    if (directionConstraint.touchId !== null) return;
+    directionConstraint.touchId = event.pointerId;
+    directionConstraint.startX = event.clientX;
+    directionConstraint.startY = event.clientY;
+    clearConstraintTimer();
+    directionConstraint.timer = setTimeout(activateDirectionConstraint, 180);
+  }
+
+  function releaseDirectionConstraint({ keepTouch = false } = {}) {
+    clearConstraintTimer();
+    directionConstraint.active = false;
+    directionConstraint.axis = null;
+    directionConstraint.baseline = null;
+    if (!keepTouch) directionConstraint.touchId = null;
+    updateConstraintHint();
+  }
+
+  function applyDirectionConstraint(point) {
+    if (!directionConstraint.active || !directionConstraint.baseline) return point;
+    if (!directionConstraint.axis) {
+      directionConstraint.axis = constraintAxisFromHistory();
+      updateConstraintHint();
+      if (!directionConstraint.axis) return point;
+    }
+
+    const baseline = directionConstraint.baseline;
+    if (directionConstraint.axis === "guide-x") {
+      return { ...point, v: baseline.v };
+    }
+    if (directionConstraint.axis === "guide-y") {
+      return { ...point, u: baseline.u };
+    }
+
+    const axis = directionConstraint.axis === "world-y"
+      ? new THREE.Vector3(0, 1, 0)
+      : directionConstraint.axis === "world-x"
+        ? new THREE.Vector3(1, 0, 0)
+        : new THREE.Vector3(0, 0, 1);
+    const basePosition = new THREE.Vector3(
+      baseline.position.x,
+      baseline.position.y,
+      baseline.position.z,
+    );
+    const rawPosition = new THREE.Vector3(
+      point.position.x,
+      point.position.y,
+      point.position.z,
+    );
+    const position = basePosition.add(
+      axis.multiplyScalar(rawPosition.sub(basePosition).dot(axis)),
+    );
+    return { ...point, position: pointValue(position) };
   }
 
   function addLocalTestStroke() {
@@ -712,7 +1143,9 @@ if (modelViewer && viewerShell) {
     const params = new URLSearchParams(location.search);
     const enabled = location.hostname === "localhost" && params.has("guide-test");
     if (!enabled) return;
-    const sourceType = params.get("guide-test") === "view" ? "view" : "face";
+    const sourceType = ["draw", "view"].includes(params.get("guide-test"))
+      ? "draw"
+      : "face";
 
     const rect = viewerShell.getBoundingClientRect();
     const candidates = [
@@ -735,7 +1168,36 @@ if (modelViewer && viewerShell) {
       return;
     }
 
-    if (!createGuideFromHit(guideHit, sourceType)) {
+    let guideCreated = false;
+    if (sourceType === "draw") {
+      const frame = viewPlaneFrame();
+      const anchor = new THREE.Vector3(
+        guideHit.position.x,
+        guideHit.position.y,
+        guideHit.position.z,
+      );
+      const endSample = {
+        clientX: rect.left + rect.width * 0.68,
+        clientY: rect.top + rect.height * 0.44,
+      };
+      const endHit = frame && intersectPlaneFrame(endSample, {
+        ...frame,
+        origin: pointValue(anchor),
+      });
+      if (frame && endHit) {
+        guideCreated = createGuideFromDrawGesture({
+          frame: { ...frame, origin: pointValue(anchor) },
+          points: [anchor, endHit.position],
+          startClientX: rect.left + rect.width * 0.5,
+          startClientY: rect.top + rect.height * 0.5,
+          endClientX: endSample.clientX,
+          endClientY: endSample.clientY,
+        });
+      }
+    } else {
+      guideCreated = createFaceGuideFromHit(guideHit);
+    }
+    if (!guideCreated) {
       canvas.dataset.localGuideTestPoints = "frame-error";
       return;
     }
@@ -775,6 +1237,8 @@ if (modelViewer && viewerShell) {
       canvas.dataset.localGuideTestReference = stroke.referenceId;
       canvas.dataset.localGuideTestSource = sourceType;
       canvas.dataset.localGuideOutsidePoints = String(outsidePreviewPoints);
+      const plane = references.getTracePlane(stroke.referenceId);
+      canvas.dataset.localGuideSourceMetadata = plane?.sourceType || "missing";
       updatePointCount();
       updateActionState();
     } else {
@@ -782,6 +1246,52 @@ if (modelViewer && viewerShell) {
       canvas.dataset.localGuideTestPoints = "0";
     }
     requestRender();
+  }
+
+  function addLocalSprint07Checks() {
+    const params = new URLSearchParams(location.search);
+    if (location.hostname !== "localhost" || !params.has("sprint07-test")) return;
+
+    const plane = activeTracePlaneId
+      ? references.getTracePlane(activeTracePlaneId)
+      : null;
+    if (plane) {
+      directionConstraint.active = true;
+      directionConstraint.axis = "guide-x";
+      directionConstraint.baseline = { u: 2, v: 3 };
+      const guideX = applyDirectionConstraint({ u: 9, v: 11 });
+      directionConstraint.axis = "guide-y";
+      const guideY = applyDirectionConstraint({ u: 9, v: 11 });
+      canvas.dataset.localGuideConstraint = (
+        guideX.u === 9
+        && guideX.v === 3
+        && guideY.u === 2
+        && guideY.v === 11
+      ) ? "pass" : "fail";
+      releaseDirectionConstraint();
+    }
+
+    directionConstraint.active = true;
+    directionConstraint.axis = "world-y";
+    directionConstraint.baseline = {
+      position: { x: 1, y: 2, z: 3 },
+    };
+    const constrainedModelPoint = applyDirectionConstraint({
+      position: { x: 7, y: 8, z: 9 },
+      normal: { x: 0, y: 0, z: 1 },
+    });
+    canvas.dataset.localModelConstraint = (
+      constrainedModelPoint.position.x === 1
+      && constrainedModelPoint.position.y === 8
+      && constrainedModelPoint.position.z === 3
+    ) ? "pass" : "fail";
+    releaseDirectionConstraint();
+
+    if (plane && params.get("sprint07-test") === "align") {
+      canvas.dataset.localGuideAlign = alignCameraToGuide(plane.origin)
+        ? "requested"
+        : "fail";
+    }
   }
 
   function inspectPenSample(sample, { store = false } = {}) {
@@ -811,13 +1321,16 @@ if (modelViewer && viewerShell) {
       tiltY: Number(sample.tiltY) || 0,
       timestamp: Number(sample.timeStamp),
     };
-    const point = referenceType === REFERENCE_TYPES.PLANE
+    const rawPoint = referenceType === REFERENCE_TYPES.PLANE
       ? { u: hit.u, v: hit.v, ...inputData }
       : {
           position: pointValue(hit.position),
           normal: pointValue(hit.normal),
           ...inputData,
         };
+    penRawHistory.push(structuredClone(rawPoint));
+    if (penRawHistory.length > 12) penRawHistory.shift();
+    const point = applyDirectionConstraint(rawPoint);
     appendStrokePoint(activeStroke, point);
     trackProjectionError(pointValue(hit.position), sample);
     updatePointCount();
@@ -840,11 +1353,108 @@ if (modelViewer && viewerShell) {
     debug.xyz.textContent = hit
       ? `${hit.position.x.toFixed(3)}, ${hit.position.y.toFixed(3)}, ${hit.position.z.toFixed(3)}`
       : "—";
-    if (hit) createGuideFromHit(hit, pendingGuideSourceType || "face");
+    if (hit) createFaceGuideFromHit(hit);
+  }
+
+  function onTouchPointerDown(event) {
+    const penOwnsGesture = activePenId !== null || guideDraft !== null;
+    if (penOwnsGesture) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressedTouchIds.add(event.pointerId);
+      try {
+        modelViewer.setPointerCapture(event.pointerId);
+      } catch {
+        // Suppression still works through capture-phase listeners.
+      }
+      if (activePenId !== null) beginDirectionConstraint(event);
+      return;
+    }
+
+    if (activeDrawingSupport.type !== REFERENCE_TYPES.PLANE) return;
+    const now = performance.now();
+    const suppressNavigation = Boolean(
+      lastGuideTap
+      && now - lastGuideTap.time <= 360
+      && Math.hypot(
+        event.clientX - lastGuideTap.clientX,
+        event.clientY - lastGuideTap.clientY,
+      ) <= 36
+    );
+    touchTapCandidates.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      startX: event.clientX,
+      startY: event.clientY,
+      startTime: now,
+      moved: false,
+      suppressNavigation,
+    });
+    if (suppressNavigation) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function onTouchPointerMove(event) {
+    if (suppressedTouchIds.has(event.pointerId)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (
+        event.pointerId === directionConstraint.touchId
+        && !directionConstraint.active
+        && Math.hypot(
+          event.clientX - directionConstraint.startX,
+          event.clientY - directionConstraint.startY,
+        ) > 12
+      ) {
+        clearConstraintTimer();
+      }
+      return;
+    }
+    const candidate = touchTapCandidates.get(event.pointerId);
+    if (!candidate) return;
+    candidate.clientX = event.clientX;
+    candidate.clientY = event.clientY;
+    if (Math.hypot(event.clientX - candidate.startX, event.clientY - candidate.startY) > 12) {
+      candidate.moved = true;
+    }
+    if (candidate.suppressNavigation) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function onTouchPointerEnd(event) {
+    if (suppressedTouchIds.has(event.pointerId)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressedTouchIds.delete(event.pointerId);
+      if (event.pointerId === directionConstraint.touchId) {
+        releaseDirectionConstraint();
+      }
+      return;
+    }
+
+    const candidate = touchTapCandidates.get(event.pointerId);
+    touchTapCandidates.delete(event.pointerId);
+    if (!candidate) return;
+    candidate.clientX = event.clientX;
+    candidate.clientY = event.clientY;
+    const isTap = event.type === "pointerup"
+      && !candidate.moved
+      && performance.now() - candidate.startTime <= 300;
+    if (candidate.suppressNavigation) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    if (isTap) registerGuideTap(candidate);
   }
 
   function beginPenStroke(event) {
     if (activePenId !== null) return;
+    penRawHistory.length = 0;
+    releaseDirectionConstraint();
     activePenId = event.pointerId;
     activeStroke = createActiveStroke();
     debug.penActive.textContent = "yes";
@@ -877,6 +1487,10 @@ if (modelViewer && viewerShell) {
 
     activeStroke = null;
     activePenId = null;
+    penRawHistory.length = 0;
+    releaseDirectionConstraint({
+      keepTouch: directionConstraint.touchId !== null,
+    });
     if (resumeAutoRotate) modelViewer.setAttribute("auto-rotate", "");
     resumeAutoRotate = false;
     debug.penActive.textContent = "no";
@@ -887,6 +1501,10 @@ if (modelViewer && viewerShell) {
 
   function onPointerDown(event) {
     debug.pointerType.textContent = event.pointerType || "unknown";
+    if (event.pointerType === "touch") {
+      onTouchPointerDown(event);
+      return;
+    }
     if (event.pointerType !== "pen") return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -898,7 +1516,11 @@ if (modelViewer && viewerShell) {
       } catch {
         // The selection still works when pointer capture is unavailable.
       }
-      selectGuideSurface(event);
+      if (pendingGuideSourceType === "draw") {
+        beginDrawGuideDraft(event);
+      } else {
+        selectGuideSurface(event);
+      }
       return;
     }
 
@@ -907,11 +1529,18 @@ if (modelViewer && viewerShell) {
 
   function onPointerMove(event) {
     debug.pointerType.textContent = event.pointerType || "unknown";
+    if (event.pointerType === "touch") {
+      onTouchPointerMove(event);
+      return;
+    }
     if (event.pointerType !== "pen") return;
 
     if (event.pointerId === guideSelectionPenId) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (guideDraft) {
+        for (const sample of samplesFrom(event)) appendGuideDraftSample(sample);
+      }
       return;
     }
 
@@ -927,9 +1556,21 @@ if (modelViewer && viewerShell) {
   }
 
   function onPointerEnd(event) {
+    if (event.pointerType === "touch") {
+      onTouchPointerEnd(event);
+      return;
+    }
     if (event.pointerId === guideSelectionPenId) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (guideDraft) {
+        if (event.type === "pointercancel") {
+          clearGuideDraft();
+          showGuideMessage("Start on model · Draw one line");
+        } else {
+          finishDrawGuideDraft(event);
+        }
+      }
       guideSelectionPenId = null;
       return;
     }
@@ -954,6 +1595,11 @@ if (modelViewer && viewerShell) {
     if (activeStroke) disposeStroke(activeStroke);
     activeStroke = null;
     activePenId = null;
+    penRawHistory.length = 0;
+    clearGuideDraft();
+    releaseDirectionConstraint({
+      keepTouch: directionConstraint.touchId !== null,
+    });
     if (resumeAutoRotate) modelViewer.setAttribute("auto-rotate", "");
     resumeAutoRotate = false;
     lastStrokePointCount = 0;
@@ -986,7 +1632,7 @@ if (modelViewer && viewerShell) {
 
   newGuideButton.addEventListener("click", toggleGuideCreationMenu);
   fromFaceButton.addEventListener("click", () => beginGuideSelection("face"));
-  fromViewButton.addEventListener("click", () => beginGuideSelection("view"));
+  drawGuideButton.addEventListener("click", () => beginGuideSelection("draw"));
   offsetSlider.addEventListener("input", () => {
     setActiveGuideOffset(offsetSlider.value);
   });
@@ -1004,6 +1650,7 @@ if (modelViewer && viewerShell) {
       validateCameraSync();
       addLocalTestStroke();
       addLocalGuideTest();
+      addLocalSprint07Checks();
     });
   });
 
@@ -1018,6 +1665,16 @@ if (modelViewer && viewerShell) {
     getStrokes: () => structuredClone(strokes),
     getTracePlanes: () => structuredClone(references.listTracePlanes()),
     getActiveDrawingSupport: () => structuredClone(activeDrawingSupport),
+    getGuideCreationState: () => ({
+      mode: pendingGuideSourceType,
+      pending: guideSelectionPending,
+      draftPointCount: guideDraft?.points.length ?? 0,
+    }),
+    getConstraintState: () => ({
+      active: directionConstraint.active,
+      axis: directionConstraint.axis,
+      touchId: directionConstraint.touchId,
+    }),
     getRendererState: () => ({
       lastProjectionError,
       maximumProjectionError,
