@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "name": "model.glb",
+    "sizeBytes": 25719996,
+    "sha256": "69c6ed446126238e4d853cb2329149731502cf294f411c6caf7b45c5649d07fd"
+  },
+  "output": {
+    "name": "model.glb",
+    "sizeBytes": 25719996,
+    "sha256": "c4a8126d45121b6fdc2cf07ada797e8454d37f5b02a9828049579d242c03911f"
+  },
+  "gltfVersion": "2.0",
+  "counts": {
+    "scenes": 1,
+    "nodes": 464,
+    "meshes": 285,
+    "primitives": 399,
+    "storedTriangles": 250007,
+    "renderedTriangles": 306448,
+    "materials": 98,
+    "textures": 29,
+    "animations": 0
+  },
+  "bounds": {
+    "min": [
+      -1.400108999,
+      -0.100018234,
+      -9.65030987
+    ],
+    "max": [
+      5.304719262,
+      3.000029507,
+      0.348247586
+    ],
+    "size": [
+      6.704828261,
+      3.10004774,
+      9.998557456
+    ],
+    "center": [
+      1.952305132,
+      1.450005636,
+      -4.651031142
+    ],
+    "distanceFromOrigin": 5.248438087
+  },
+  "textures": {
+    "totalBytes": 3886746,
+    "formats": [
+      "image/webp"
+    ],
+    "maxWidth": 2048,
+    "maxHeight": 1842,
+    "transparentCount": 3
+  },
+  "extensions": {
+    "used": [
+      "EXT_texture_webp"
+    ],
+    "required": [
+      "EXT_texture_webp"
+    ]
+  },
+  "optimizationProfile": {
+    "name": "viewer-safe",
+    "maxTextureSize": 2048,
+    "colorTextureQuality": 82,
+    "webpEffort": 100,
+    "preserveRenderedTriangles": true
+  },
+  "validation": {
+    "passed": true,
+    "warnings": []
+  }
+}

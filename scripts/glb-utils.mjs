@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { NodeIO } from "@gltf-transform/core";
+import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import { getBounds } from "@gltf-transform/functions";
 import sharp from "sharp";
 
 export const MIB = 1024 * 1024;
@@ -8,7 +11,6 @@ export const GITHUB_FILE_LIMIT = 100 * MIB;
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (!value || typeof value !== "object") return value;
-
   return Object.fromEntries(
     Object.keys(value)
       .filter((key) => key !== "name" && key !== "extras")
@@ -19,6 +21,19 @@ function stableValue(value) {
 
 function functionalMaterialKey(material) {
   return JSON.stringify(stableValue(material));
+}
+
+function materialCoreValue(material = {}) {
+  const pbr = material.pbrMetallicRoughness ?? {};
+  return {
+    alphaCutoff: material.alphaCutoff ?? 0.5,
+    alphaMode: material.alphaMode ?? "OPAQUE",
+    baseColorFactor: pbr.baseColorFactor ?? [1, 1, 1, 1],
+    doubleSided: material.doubleSided ?? false,
+    emissiveFactor: material.emissiveFactor ?? [0, 0, 0],
+    metallicFactor: pbr.metallicFactor ?? 1,
+    roughnessFactor: pbr.roughnessFactor ?? 1,
+  };
 }
 
 function primitiveTriangles(primitive, accessors) {
@@ -40,15 +55,8 @@ function collectAccessorReferences(primitive, target) {
 
 function collectTextureReferences(value, target, parentKey = "") {
   if (!value || typeof value !== "object") return;
-  if (
-    parentKey.endsWith("Texture")
-    && Number.isInteger(value.index)
-  ) {
-    target.add(value.index);
-  }
-  for (const [key, child] of Object.entries(value)) {
-    collectTextureReferences(child, target, key);
-  }
+  if (parentKey.endsWith("Texture") && Number.isInteger(value.index)) target.add(value.index);
+  for (const [key, child] of Object.entries(value)) collectTextureReferences(child, target, key);
 }
 
 function textureSource(texture) {
@@ -61,14 +69,11 @@ function formatBytes(bytes) {
   return `${(bytes / MIB).toFixed(2)} MiB`;
 }
 
-export async function analyzeGLB(filePath) {
-  const bytes = await readFile(filePath);
+function parseGLB(bytes, filePath) {
   if (bytes.length < 20 || bytes.readUInt32LE(0) !== 0x46546c67) {
     throw new Error(`${filePath} is not a valid GLB file.`);
   }
-  if (bytes.readUInt32LE(4) !== 2) {
-    throw new Error(`${filePath} is not glTF 2.0.`);
-  }
+  if (bytes.readUInt32LE(4) !== 2) throw new Error(`${filePath} is not glTF 2.0.`);
   if (bytes.readUInt32LE(8) !== bytes.length) {
     throw new Error(`${filePath} has an invalid declared byte length.`);
   }
@@ -79,21 +84,100 @@ export async function analyzeGLB(filePath) {
   let binaryOffset = 0;
   let binaryBytes = 0;
   while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) throw new Error(`${filePath} has a truncated GLB chunk header.`);
     const length = bytes.readUInt32LE(offset);
     const type = bytes.readUInt32LE(offset + 4);
     const dataOffset = offset + 8;
+    const dataEnd = dataOffset + length;
+    if (dataEnd > bytes.length) throw new Error(`${filePath} has a truncated GLB chunk.`);
     if (type === 0x4e4f534a) {
       jsonBytes = length;
-      jsonChunk = bytes.subarray(dataOffset, dataOffset + length);
+      jsonChunk = bytes.subarray(dataOffset, dataEnd);
     } else if (type === 0x004e4942) {
       binaryOffset = dataOffset;
       binaryBytes = length;
     }
-    offset = dataOffset + length;
+    offset = dataEnd;
   }
   if (!jsonChunk) throw new Error(`${filePath} does not contain a JSON chunk.`);
+  return {
+    gltf: JSON.parse(new TextDecoder().decode(jsonChunk).trim()),
+    jsonBytes,
+    binaryOffset,
+    binaryBytes,
+  };
+}
 
-  const gltf = JSON.parse(new TextDecoder().decode(jsonChunk).trim());
+function finiteVector(vector) {
+  return Array.isArray(vector) && vector.length === 3 && vector.every(Number.isFinite);
+}
+
+function normalizedNumber(value) {
+  if (!Number.isFinite(value)) return value;
+  const rounded = Math.round(value * 1e9) / 1e9;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function aggregateBounds(root) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  let found = false;
+  for (const scene of root.listScenes()) {
+    const sceneBounds = getBounds(scene);
+    if (!finiteVector(sceneBounds.min) || !finiteVector(sceneBounds.max)) continue;
+    found = true;
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis], sceneBounds.min[axis]);
+      max[axis] = Math.max(max[axis], sceneBounds.max[axis]);
+    }
+  }
+  if (!found) {
+    return {
+      valid: false,
+      min: null,
+      max: null,
+      size: null,
+      center: null,
+      diagonal: null,
+      distanceFromOrigin: null,
+    };
+  }
+  const size = max.map((value, axis) => value - min[axis]);
+  const center = max.map((value, axis) => (value + min[axis]) / 2);
+  const normalized = (values) => values.map(normalizedNumber);
+  return {
+    valid: finiteVector(min) && finiteVector(max) && size.every(Number.isFinite),
+    min: normalized(min),
+    max: normalized(max),
+    size: normalized(size),
+    center: normalized(center),
+    diagonal: normalizedNumber(Math.hypot(...size)),
+    distanceFromOrigin: normalizedNumber(Math.hypot(...center)),
+  };
+}
+
+function countInvalidNumericValues(root) {
+  let count = 0;
+  for (const accessor of root.listAccessors()) {
+    const array = accessor.getArray();
+    if (!array) continue;
+    for (let index = 0; index < array.length; index += 1) {
+      if (!Number.isFinite(array[index])) count += 1;
+    }
+  }
+  return count;
+}
+
+export async function sha256File(filePath) {
+  return createHash("sha256").update(await readFile(filePath)).digest("hex");
+}
+
+export async function analyzeGLB(filePath) {
+  const bytes = await readFile(filePath);
+  const { gltf, jsonBytes, binaryOffset, binaryBytes } = parseGLB(bytes, filePath);
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  const document = await io.read(filePath);
+  const root = document.getRoot();
   const nodes = gltf.nodes ?? [];
   const meshes = gltf.meshes ?? [];
   const materials = gltf.materials ?? [];
@@ -137,12 +221,8 @@ export async function analyzeGLB(filePath) {
     for (const accessorIndex of accessorSet) {
       const accessor = accessors[accessorIndex];
       if (accessor?.bufferView !== undefined) viewSet.add(accessor.bufferView);
-      if (accessor?.sparse?.indices?.bufferView !== undefined) {
-        viewSet.add(accessor.sparse.indices.bufferView);
-      }
-      if (accessor?.sparse?.values?.bufferView !== undefined) {
-        viewSet.add(accessor.sparse.values.bufferView);
-      }
+      if (accessor?.sparse?.indices?.bufferView !== undefined) viewSet.add(accessor.sparse.indices.bufferView);
+      if (accessor?.sparse?.values?.bufferView !== undefined) viewSet.add(accessor.sparse.values.bufferView);
     }
     const geometryBytes = [...viewSet].reduce(
       (sum, viewIndex) => sum + (bufferViews[viewIndex]?.byteLength ?? 0),
@@ -161,6 +241,16 @@ export async function analyzeGLB(filePath) {
   for (const nodeIndex of reachableNodes) {
     const meshIndex = nodes[nodeIndex]?.mesh;
     if (meshIndex !== undefined) sceneTriangles += meshTriangleCounts.get(meshIndex) ?? 0;
+  }
+
+  let renderablePrimitives = 0;
+  for (const meshIndex of usedMeshes) {
+    for (const primitive of meshes[meshIndex]?.primitives ?? []) {
+      const positionIndex = primitive.attributes?.POSITION;
+      if (positionIndex !== undefined && (accessors[positionIndex]?.count ?? 0) > 0) {
+        renderablePrimitives += 1;
+      }
+    }
   }
 
   const usedMaterials = new Set();
@@ -182,9 +272,7 @@ export async function analyzeGLB(filePath) {
   }
 
   const usedTextures = new Set();
-  for (const materialIndex of usedMaterials) {
-    collectTextureReferences(materials[materialIndex], usedTextures);
-  }
+  for (const materialIndex of usedMaterials) collectTextureReferences(materials[materialIndex], usedTextures);
   const usedImages = new Set();
   for (const textureIndex of usedTextures) {
     const source = textureSource(textures[textureIndex] ?? {});
@@ -216,27 +304,51 @@ export async function analyzeGLB(filePath) {
           hasTransparency = Boolean(stats.channels[3] && stats.channels[3].min < 255);
         }
       } catch {
-        // Unsupported image formats remain valid glTF resources; size is still reported.
+        // Unsupported image formats remain valid glTF resources.
       }
     }
     imageRows.push({
       imageIndex,
       name: image.name || image.uri || `Image ${imageIndex}`,
+      hasStableIdentity: Boolean(image.name || (image.uri && !image.uri.startsWith("data:"))),
       mimeType: image.mimeType ?? null,
       bytes: imageBytes?.length ?? 0,
       width,
       height,
       hasTransparency,
-      oversized: Math.max(width ?? 0, height ?? 0) > 2048,
-      hash: imageBytes?.length
-        ? createHash("sha256").update(imageBytes).digest("hex")
-        : null,
+      oversized: false,
+      hash: imageBytes?.length ? createHash("sha256").update(imageBytes).digest("hex") : null,
     });
   }
 
-  const functionalMaterialCount = new Set(
-    materials.map(functionalMaterialKey),
-  ).size;
+  const decodedTextures = root.listTextures();
+  for (let textureIndex = 0; textureIndex < decodedTextures.length; textureIndex += 1) {
+    const imageIndex = textureSource(textures[textureIndex] ?? {});
+    const row = imageRows[imageIndex];
+    if (!row) continue;
+    const imageBytes = decodedTextures[textureIndex].getImage();
+    row.mimeType ||= decodedTextures[textureIndex].getMimeType() || null;
+    if (!imageBytes || (row.width && row.height)) continue;
+    try {
+      const metadata = await sharp(imageBytes).metadata();
+      row.bytes = imageBytes.byteLength;
+      row.width = metadata.width ?? null;
+      row.height = metadata.height ?? null;
+      if (metadata.hasAlpha) {
+        const stats = await sharp(imageBytes).stats();
+        row.hasTransparency = Boolean(stats.channels[3] && stats.channels[3].min < 255);
+      }
+      row.hash = createHash("sha256").update(imageBytes).digest("hex");
+    } catch {
+      // Keep unknown dimensions for codecs unsupported by Sharp.
+    }
+  }
+  for (const row of imageRows) row.oversized = Math.max(row.width ?? 0, row.height ?? 0) > 2048;
+
+  const functionalMaterialCount = new Set(materials.map(functionalMaterialKey)).size;
+  const materialCoreSignatures = [...new Set(
+    [...usedMaterials].map((materialIndex) => JSON.stringify(materialCoreValue(materials[materialIndex]))),
+  )].sort();
   const textureBytes = imageRows.reduce((sum, image) => sum + image.bytes, 0);
   const unused = {
     nodes: nodes.length - reachableNodes.size,
@@ -246,40 +358,50 @@ export async function analyzeGLB(filePath) {
     textures: textures.length - usedTextures.size,
     images: images.length - usedImages.size,
   };
-
   const imageHashes = imageRows.map((image) => image.hash).filter(Boolean);
+  const externalResourceURIs = [
+    ...(gltf.buffers ?? []).map((buffer) => buffer.uri),
+    ...images.map((image) => image.uri),
+  ].filter((uri) => uri && !uri.startsWith("data:"));
 
   return {
     path: filePath,
+    gltfVersion: String(gltf.asset?.version ?? ""),
     totalBytes: bytes.length,
     jsonBytes,
     binaryBytes,
+    scenes: gltf.scenes?.length ?? 0,
     nodes: nodes.length,
     meshes: meshes.length,
     primitives: primitiveCount,
+    renderablePrimitives,
     materials: materials.length,
     functionallyUniqueMaterials: functionalMaterialCount,
     duplicateMaterials: materials.length - functionalMaterialCount,
+    materialCoreSignatures,
     accessors: accessors.length,
+    animations: gltf.animations?.length ?? 0,
     textures: textures.length,
     images: images.length,
     textureBytes,
+    textureFormats: [...new Set(imageRows.map((image) => image.mimeType).filter(Boolean))].sort(),
+    maxTextureWidth: Math.max(0, ...imageRows.map((image) => image.width ?? 0)),
+    maxTextureHeight: Math.max(0, ...imageRows.map((image) => image.height ?? 0)),
+    transparentTextureCount: imageRows.filter((image) => image.hasTransparency).length,
     storedTriangles,
     sceneTriangles,
-    averageTrianglesPerPrimitive: primitiveCount
-      ? storedTriangles / primitiveCount
-      : 0,
+    averageTrianglesPerPrimitive: primitiveCount ? storedTriangles / primitiveCount : 0,
+    invalidNumericValues: countInvalidNumericValues(root),
+    bounds: aggregateBounds(root),
     unused,
     oversizedTextureCount: imageRows.filter((image) => image.oversized).length,
     duplicateImageCount: imageHashes.length - new Set(imageHashes).size,
-    largestMeshes: meshRows
-      .sort((a, b) => b.geometryBytes - a.geometryBytes)
-      .slice(0, 20),
-    largestTextures: imageRows
-      .sort((a, b) => b.bytes - a.bytes)
-      .slice(0, 20),
-    extensionsUsed: gltf.extensionsUsed ?? [],
-    extensionsRequired: gltf.extensionsRequired ?? [],
+    textureDetails: [...imageRows].sort((a, b) => a.imageIndex - b.imageIndex),
+    largestMeshes: meshRows.sort((a, b) => b.geometryBytes - a.geometryBytes).slice(0, 20),
+    largestTextures: imageRows.sort((a, b) => b.bytes - a.bytes).slice(0, 20),
+    extensionsUsed: [...(gltf.extensionsUsed ?? [])].sort(),
+    extensionsRequired: [...(gltf.extensionsRequired ?? [])].sort(),
+    externalResourceURIs: [...new Set(externalResourceURIs)].sort(),
   };
 }
 
@@ -292,29 +414,18 @@ export function optimizationReasons(analysis) {
     analysis.duplicateMaterials > 50
     || analysis.materials > Math.max(256, analysis.functionallyUniqueMaterials * 2)
   ) {
-    reasons.push(
-      `${analysis.duplicateMaterials.toLocaleString()} functionally duplicated materials`,
-    );
+    reasons.push(`${analysis.duplicateMaterials.toLocaleString()} functionally duplicated materials`);
   }
-  if (
-    analysis.primitives > 2_000
-    && analysis.averageTrianglesPerPrimitive < 20
-  ) {
+  if (analysis.primitives > 2_000 && analysis.averageTrianglesPerPrimitive < 20) {
     reasons.push(
       `${analysis.primitives.toLocaleString()} fragmented primitives (${analysis.averageTrianglesPerPrimitive.toFixed(1)} triangles each)`,
     );
   }
-  if (analysis.oversizedTextureCount) {
-    reasons.push(`${analysis.oversizedTextureCount} textures exceed 2048 px`);
-  }
-  if (analysis.duplicateImageCount) {
-    reasons.push(`${analysis.duplicateImageCount} duplicated embedded images`);
-  }
+  if (analysis.oversizedTextureCount) reasons.push(`${analysis.oversizedTextureCount} textures exceed 2048 px`);
+  if (analysis.duplicateImageCount) reasons.push(`${analysis.duplicateImageCount} duplicated embedded images`);
   const unusedTotal = Object.values(analysis.unused).reduce((sum, count) => sum + count, 0);
   if (unusedTotal) reasons.push(`${unusedTotal} unused scene resources`);
-  if (analysis.textureBytes > 20 * MIB) {
-    reasons.push(`embedded textures use ${formatBytes(analysis.textureBytes)}`);
-  }
+  if (analysis.textureBytes > 20 * MIB) reasons.push(`embedded textures use ${formatBytes(analysis.textureBytes)}`);
   return reasons;
 }
 
@@ -328,6 +439,7 @@ export function printableSummary(analysis) {
     renderedTriangles: analysis.sceneTriangles,
     textures: formatBytes(analysis.textureBytes),
     oversizedTextures: analysis.oversizedTextureCount,
+    bounds: analysis.bounds,
     unused: analysis.unused,
   };
 }

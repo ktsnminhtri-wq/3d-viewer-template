@@ -4,8 +4,13 @@ export const REFERENCE_TYPES = Object.freeze({
 });
 
 // model-viewer returns hit position + normal, but no stable mesh/primitive ID.
-// Surface strokes therefore reference the loaded model's local coordinate space.
-export const PRIMARY_MODEL_SURFACE_ID = "surface:model.glb";
+// Surface strokes therefore reference the dynamically resolved model URL.
+export function createModelSurfaceId(modelIdentity) {
+  if (!modelIdentity || typeof modelIdentity !== "string") {
+    throw new TypeError("A resolved model identity is required.");
+  }
+  return `surface:${modelIdentity}`;
+}
 // "view" remains accepted for compatibility with guides created by Sprint 06.
 // New view-derived guides use "draw" because their in-plane direction comes
 // from an explicit S Pen gesture rather than a one-point camera snapshot.
@@ -60,14 +65,21 @@ function validatePlaneBasis(plane) {
   }
 }
 
-export function createSpatialReferenceStore({ onReferenceChange = () => {} } = {}) {
+export function createSpatialReferenceStore({
+  onReferenceChange = () => {},
+  primarySurfaceId,
+  primarySurfaceSource,
+} = {}) {
+  if (!primarySurfaceId || !primarySurfaceSource) {
+    throw new TypeError("Primary model surface identity and source are required.");
+  }
   const surfaceReferences = new Map();
   const tracePlanes = new Map();
 
-  surfaceReferences.set(PRIMARY_MODEL_SURFACE_ID, Object.freeze({
-    id: PRIMARY_MODEL_SURFACE_ID,
+  surfaceReferences.set(primarySurfaceId, Object.freeze({
+    id: primarySurfaceId,
     coordinateSpace: "model-local",
-    source: "./model.glb",
+    source: primarySurfaceSource,
   }));
 
   function hasReference(referenceType, referenceId) {

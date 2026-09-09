@@ -1,165 +1,246 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { NodeIO } from "@gltf-transform/core";
-import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import sharp from "sharp";
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { analyzeGLB } from "./glb-utils.mjs";
+import { VIEWER_SAFE_PROFILE } from "./publisher-profile.mjs";
 
-const ORIGINAL = process.argv[2] ?? "./model-source-backup.glb";
-const OPTIMIZED = process.argv[3] ?? "./model.glb";
-const REPORT = process.argv[4] ?? "./optimization-validation-report.json";
+const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_PROJECT_ROOT = path.resolve(MODULE_DIRECTORY, "..");
 
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
-
-function primitiveTriangles(primitive) {
-  const count = primitive.getIndices()?.getCount()
-    ?? primitive.getAttribute("POSITION")?.getCount()
-    ?? 0;
-  const mode = primitive.getMode();
-  if (mode === 4) return Math.floor(count / 3);
-  if (mode === 5 || mode === 6) return Math.max(0, count - 2);
-  return 0;
-}
-
-function sceneTriangles(root) {
-  let count = 0;
-  function visit(node) {
-    const mesh = node.getMesh();
-    if (mesh) {
-      count += mesh
-        .listPrimitives()
-        .reduce((sum, primitive) => sum + primitiveTriangles(primitive), 0);
-    }
-    for (const child of node.listChildren()) visit(child);
-  }
-  for (const scene of root.listScenes()) {
-    for (const child of scene.listChildren()) visit(child);
-  }
-  return count;
-}
-
-function glbChunks(bytes) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (view.getUint32(0, true) !== 0x46546c67) throw new Error("Invalid GLB magic.");
-  const result = { totalBytes: bytes.byteLength, jsonBytes: 0, binaryBytes: 0 };
-  let offset = 12;
-  while (offset < bytes.byteLength) {
-    const length = view.getUint32(offset, true);
-    const type = view.getUint32(offset + 4, true);
-    if (type === 0x4e4f534a) result.jsonBytes = length;
-    if (type === 0x004e4942) result.binaryBytes = length;
-    offset += 8 + length;
-  }
-  return result;
-}
-
-async function inspect(path) {
-  const bytes = await readFile(path);
-  const rawJSON = JSON.parse(
-    new TextDecoder().decode(
-      bytes.subarray(20, 20 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true)),
-    ).trim(),
-  );
-  const document = await io.readBinary(bytes);
-  const root = document.getRoot();
-  const meshes = root.listMeshes();
-  const primitives = meshes.flatMap((mesh) => mesh.listPrimitives());
-  const textures = [];
-
-  for (const texture of root.listTextures()) {
-    const image = texture.getImage();
-    const metadata = image ? await sharp(image).metadata() : {};
-    const stats = image && metadata.hasAlpha ? await sharp(image).stats() : null;
-    const alphaChannel = stats?.channels?.[3];
-    textures.push({
-      name: texture.getName(),
-      mimeType: texture.getMimeType(),
-      bytes: image?.byteLength ?? 0,
-      width: metadata.width ?? null,
-      height: metadata.height ?? null,
-      hasAlpha: metadata.hasAlpha ?? false,
-      hasTransparency: Boolean(alphaChannel && alphaChannel.min < 255),
+function run(command, args, { cwd = DEFAULT_PROJECT_ROOT } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+  });
+}
+
+function issue(code, message) {
+  return { code, message };
+}
+
+function sortIssues(issues) {
+  return issues.sort((a, b) => a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
+}
+
+export async function runKhronosValidation(filePath, { projectRoot = DEFAULT_PROJECT_ROOT } = {}) {
+  const cliPath = path.join(projectRoot, "node_modules", "@gltf-transform", "cli", "bin", "cli.js");
+  const result = await run(process.execPath, [cliPath, "validate", filePath], { cwd: projectRoot });
+  if (result.code !== 0 || !/No errors found\./i.test(result.stdout)) {
+    throw new Error(`Khronos glTF validation failed for ${path.basename(filePath)}.\n${result.stdout}${result.stderr}`);
+  }
+  return { passed: true };
+}
+
+export function evaluatePublishability(analysis, {
+  profile = VIEWER_SAFE_PROFILE,
+  candidate = false,
+} = {}) {
+  const errors = [];
+  const warnings = [];
+
+  if (analysis.scenes < 1) errors.push(issue("NO_SCENE", "The GLB does not contain a scene."));
+  if (analysis.renderablePrimitives < 1) {
+    errors.push(issue("NO_RENDERABLE_PRIMITIVE", "No scene-reachable primitive contains POSITION data."));
+  }
+  if (analysis.invalidNumericValues > 0) {
+    errors.push(issue(
+      "INVALID_NUMERIC_DATA",
+      `${analysis.invalidNumericValues} accessor values are NaN or Infinity.`,
+    ));
+  }
+  if (!analysis.bounds.valid || !analysis.bounds.size?.every(Number.isFinite)) {
+    errors.push(issue("INVALID_BOUNDS", "World-space model bounds are missing or non-finite."));
+  } else {
+    const diagonal = analysis.bounds.diagonal;
+    if (diagonal === 0) warnings.push(issue("DEGENERATE_BOUNDS", "Model bounds have zero diagonal."));
+    if (diagonal > 10_000_000) {
+      warnings.push(issue("VERY_LARGE_BOUNDS", `Model bounds diagonal is ${diagonal}.`));
+    } else if (diagonal > 0 && diagonal < 0.000001) {
+      warnings.push(issue("VERY_SMALL_BOUNDS", `Model bounds diagonal is ${diagonal}.`));
+    }
+    const originLimit = Math.max(diagonal * 1_000, 1_000_000);
+    if (analysis.bounds.distanceFromOrigin > originLimit) {
+      warnings.push(issue(
+        "FAR_FROM_ORIGIN",
+        `Model center is ${analysis.bounds.distanceFromOrigin} units from the world origin.`,
+      ));
+    }
   }
 
-  return {
-    ...glbChunks(bytes),
-    nodes: root.listNodes().length,
-    meshes: meshes.length,
-    primitives: primitives.length,
-    materials: root.listMaterials().length,
-    accessors: root.listAccessors().length,
-    storedTriangles: primitives.reduce(
-      (sum, primitive) => sum + primitiveTriangles(primitive),
-      0,
-    ),
-    sceneTriangles: sceneTriangles(root),
-    textureBytes: textures.reduce((sum, texture) => sum + texture.bytes, 0),
-    textures,
-    extensionsUsed: rawJSON.extensionsUsed ?? [],
-    extensionsRequired: rawJSON.extensionsRequired ?? [],
+  if (analysis.externalResourceURIs.length) {
+    warnings.push(issue(
+      "EXTERNAL_RESOURCES",
+      `GLB references ${analysis.externalResourceURIs.length} external resource(s); they will be embedded in output.`,
+    ));
+  }
+  const texturesOverProfileLimit = analysis.textureDetails.filter(
+    (texture) => Math.max(texture.width ?? 0, texture.height ?? 0) > profile.maxTextureSize,
+  ).length;
+  if (texturesOverProfileLimit) {
+    const message = `${texturesOverProfileLimit} texture(s) exceed ${profile.maxTextureSize}px.`;
+    if (candidate) errors.push(issue("TEXTURE_LIMIT_EXCEEDED", message));
+    else warnings.push(issue("SOURCE_TEXTURE_RESIZE_REQUIRED", message));
+  }
+  return { errors: sortIssues(errors), warnings: sortIssues(warnings) };
+}
+
+function boundsClose(before, after) {
+  if (!before.valid || !after.valid) return false;
+  const scale = Math.max(
+    1,
+    before.diagonal ?? 0,
+    after.diagonal ?? 0,
+    before.distanceFromOrigin ?? 0,
+    after.distanceFromOrigin ?? 0,
+  );
+  const tolerance = scale * 0.000001;
+  return [...before.min, ...before.max].every((value, index) => {
+    const other = index < 3 ? after.min[index] : after.max[index - 3];
+    return Math.abs(value - other) <= tolerance;
+  });
+}
+
+function transparencyChecks(before, after) {
+  const failures = [];
+  const warnings = [];
+  const beforeNameCounts = new Map();
+  const afterNameCounts = new Map();
+  for (const texture of before.textureDetails) {
+    if (texture.name) beforeNameCounts.set(texture.name, (beforeNameCounts.get(texture.name) ?? 0) + 1);
+  }
+  for (const texture of after.textureDetails) {
+    if (texture.name) afterNameCounts.set(texture.name, (afterNameCounts.get(texture.name) ?? 0) + 1);
+  }
+  let unverifiable = 0;
+  for (const texture of before.textureDetails.filter((item) => item.hasTransparency)) {
+    const reliableName = texture.hasStableIdentity
+      && texture.name
+      && beforeNameCounts.get(texture.name) === 1
+      && afterNameCounts.get(texture.name) === 1;
+    if (!reliableName) {
+      unverifiable += 1;
+      continue;
+    }
+    const output = after.textureDetails.find((item) => item.name === texture.name);
+    if (!output?.hasTransparency) {
+      failures.push(issue(
+        "TRANSPARENCY_NOT_PRESERVED",
+        `Transparent texture is no longer transparent: ${texture.name}`,
+      ));
+    }
+  }
+  if (unverifiable) {
+    warnings.push(issue(
+      "TRANSPARENCY_IDENTITY_UNVERIFIABLE",
+      `${unverifiable} transparent texture(s) could not be matched reliably by a unique name.`,
+    ));
+  }
+  return { failures, warnings };
+}
+
+export async function validateCandidate({
+  sourcePath,
+  candidatePath,
+  sourceAnalysis = null,
+  candidateAnalysis = null,
+  profile = VIEWER_SAFE_PROFILE,
+  projectRoot = DEFAULT_PROJECT_ROOT,
+  reportPath = null,
+} = {}) {
+  if (!sourcePath || !candidatePath) {
+    throw new Error("validateCandidate requires sourcePath and candidatePath.");
+  }
+  await runKhronosValidation(candidatePath, { projectRoot });
+  const before = sourceAnalysis ?? await analyzeGLB(sourcePath);
+  const after = candidateAnalysis ?? await analyzeGLB(candidatePath);
+  const candidateIssues = evaluatePublishability(after, { profile, candidate: true });
+  const failures = [...candidateIssues.errors];
+  const warnings = [...candidateIssues.warnings];
+
+  if (profile.preserveRenderedTriangles && before.sceneTriangles !== after.sceneTriangles) {
+    failures.push(issue(
+      "RENDERED_TRIANGLES_CHANGED",
+      `Rendered triangle count changed from ${before.sceneTriangles} to ${after.sceneTriangles}.`,
+    ));
+  }
+  if (!boundsClose(before.bounds, after.bounds)) {
+    failures.push(issue("BOUNDS_CHANGED", "World-space bounds changed beyond the validation tolerance."));
+  }
+
+  const afterMaterialSignatures = new Set(after.materialCoreSignatures);
+  for (const signature of before.materialCoreSignatures) {
+    if (!afterMaterialSignatures.has(signature)) {
+      failures.push(issue(
+        "CORE_MATERIAL_CHANGED",
+        `A source material core property set is missing in output: ${signature}`,
+      ));
+    }
+  }
+
+  const allowedAdded = new Set(profile.allowedAddedRequiredExtensions);
+  for (const extension of after.extensionsRequired) {
+    if (!before.extensionsRequired.includes(extension) && !allowedAdded.has(extension)) {
+      failures.push(issue(
+        "UNEXPECTED_REQUIRED_EXTENSION",
+        `Optimizer added unsupported required extension: ${extension}`,
+      ));
+    }
+  }
+
+  const transparency = transparencyChecks(before, after);
+  failures.push(...transparency.failures);
+  warnings.push(...transparency.warnings);
+  sortIssues(failures);
+  sortIssues(warnings);
+
+  const report = {
+    passed: failures.length === 0,
+    profile: profile.name,
+    failures,
+    warnings,
+    before,
+    after,
   };
-}
-
-const before = await inspect(ORIGINAL);
-const after = await inspect(OPTIMIZED);
-const failures = [];
-
-if (before.sceneTriangles !== after.sceneTriangles) {
-  failures.push("Rendered scene triangle count changed.");
-}
-
-for (const texture of after.textures) {
-  if (Math.max(texture.width ?? 0, texture.height ?? 0) > 2048) {
-    failures.push(`Texture exceeds 2048 px: ${texture.name}`);
+  if (reportPath) await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  if (failures.length) {
+    throw new Error(`Candidate validation failed:\n${failures.map((item) => `- ${item.code}: ${item.message}`).join("\n")}`);
   }
+  return report;
 }
 
-const afterTexturesByName = new Map(after.textures.map((texture) => [texture.name, texture]));
-for (const texture of before.textures.filter((item) => item.hasTransparency)) {
-  const outputTexture = afterTexturesByName.get(texture.name);
-  if (!outputTexture || !outputTexture.hasTransparency) {
-    failures.push(`Required transparency was not preserved: ${texture.name}`);
-  }
+const isCLI = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isCLI) {
+  const sourcePath = process.argv[2] ?? "./model-source-backup.glb";
+  const candidatePath = process.argv[3] ?? "./model.glb";
+  const reportPath = process.argv[4] ?? "./optimization-validation-report.json";
+  const report = await validateCandidate({ sourcePath, candidatePath, reportPath });
+  console.log(JSON.stringify({
+    passed: report.passed,
+    failures: report.failures,
+    warnings: report.warnings,
+    before: {
+      sizeBytes: report.before.totalBytes,
+      primitives: report.before.primitives,
+      materials: report.before.materials,
+      renderedTriangles: report.before.sceneTriangles,
+    },
+    after: {
+      sizeBytes: report.after.totalBytes,
+      primitives: report.after.primitives,
+      materials: report.after.materials,
+      renderedTriangles: report.after.sceneTriangles,
+    },
+  }, null, 2));
 }
-
-const geometryCompressionExtensions = [
-  "KHR_draco_mesh_compression",
-  "EXT_meshopt_compression",
-  "KHR_mesh_quantization",
-];
-for (const extension of geometryCompressionExtensions) {
-  if (
-    after.extensionsUsed.includes(extension)
-    && !before.extensionsUsed.includes(extension)
-  ) {
-    failures.push(`Unexpected geometry compression extension added: ${extension}`);
-  }
-}
-
-const report = {
-  passed: failures.length === 0,
-  failures,
-  before,
-  after,
-  notes: [
-    "Scene-rendered triangle count is unchanged.",
-    "Stored triangle count decreases only because byte-identical meshes now share definitions.",
-    "No Draco, Meshopt, quantization, simplification, or other geometry compression was applied.",
-    "Color textures converted by the optimizer use WebP quality 82; data textures use lossless WebP.",
-    "Alpha channels remain present where required and output textures do not exceed 2048 px.",
-  ],
-};
-
-await writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-console.log(JSON.stringify({
-  passed: report.passed,
-  failures,
-  before: { ...before, textures: undefined },
-  after: { ...after, textures: undefined },
-  transparentTexturesBefore: before.textures.filter((texture) => texture.hasTransparency).length,
-  transparentTexturesAfter: after.textures.filter((texture) => texture.hasTransparency).length,
-  oversizedTexturesAfter: after.textures.filter(
-    (texture) => Math.max(texture.width ?? 0, texture.height ?? 0) > 2048,
-  ),
-}, null, 2));
-
-if (failures.length) process.exitCode = 1;

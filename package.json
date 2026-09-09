@@ -5,9 +5,10 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
+    "publish": "node --max-old-space-size=4096 ./scripts/publish-model.mjs",
     "optimize:model": "node --max-old-space-size=4096 ./scripts/optimize-model.mjs",
     "validate:model": "node --max-old-space-size=4096 ./scripts/validate-model.mjs",
-    "preview": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs --preview",
+    "preview": "node --max-old-space-size=4096 ./scripts/preview-server.mjs",
     "deploy": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs"
   },
   "keywords": [],

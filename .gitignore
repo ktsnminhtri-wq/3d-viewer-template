@@ -9,3 +9,9 @@ model-analysis-summary.json
 model-*-analysis.csv
 model-duplicate-meshes.csv
 optimization-*-report.json
+dist/*
+!dist/current/
+dist/current/*
+!dist/current/model.glb
+!dist/current/metadata.json
+.deploy-*.glb

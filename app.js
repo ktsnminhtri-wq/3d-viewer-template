@@ -13,6 +13,32 @@ const fullscreenLabel = document.querySelector("#fullscreenLabel");
 const retryButton = document.querySelector("#retryButton");
 const twoPointButton = document.querySelector("#twoPointButton");
 const threePointButton = document.querySelector("#threePointButton");
+const modelPathHint = document.querySelector("#modelPathHint");
+
+function resolveModelSource() {
+  const fallback = modelViewer.dataset.defaultModel || "./model.glb";
+  const search = new URLSearchParams(window.location.search);
+  const requested = search.get("model") || fallback;
+  const resolved = new URL(requested, document.baseURI);
+  if (!new Set(["http:", "https:"]).has(resolved.protocol)) {
+    throw new Error(`Không hỗ trợ giao thức model: ${resolved.protocol}`);
+  }
+  const version = search.get("v");
+  if (version) resolved.searchParams.set("v", version);
+  return { requested, resolved };
+}
+
+try {
+  const modelSource = resolveModelSource();
+  modelViewer.setAttribute("src", modelSource.resolved.href);
+  modelViewer.dataset.modelIdentity = modelSource.resolved.href;
+  modelPathHint.textContent = modelSource.requested;
+} catch (error) {
+  loadingPanel.hidden = true;
+  errorPanel.hidden = false;
+  modelPathHint.textContent = error.message;
+  console.error(error);
+}
 
 const defaultOrbit = modelViewer.getAttribute("camera-orbit") || "0deg 75deg auto";
 const defaultTarget = "auto auto auto";

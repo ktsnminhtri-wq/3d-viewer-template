@@ -1,176 +1,225 @@
-# Trình xem mô hình 3D
+# Universal Local GLB Publishing Lab
 
-Website tĩnh toàn màn hình để xem file `model.glb` bằng Google `<model-viewer>`. Trang hỗ trợ xoay, zoom, cảm ứng, đặt lại góc nhìn, tự động xoay và toàn màn hình.
+Project gồm một pipeline Node.js chạy hoàn toàn cục bộ và một website tĩnh dùng Google `<model-viewer>`. Pipeline nhận file GLB ở bất kỳ đường dẫn nào, tạo artifact đã tối ưu/kiểm định trong `dist/current`, rồi viewer dùng artifact đó để preview.
 
-## Cấu trúc thư mục
+Pipeline runtime không dùng AI. Codex chỉ hỗ trợ phát triển mã nguồn; lệnh publish không gọi dịch vụ AI và không cần phân tích thủ công cho từng model.
 
-```text
-.
-├── index.html
-├── styles.css
-├── app.js
-├── assets/
-│   └── spruit-sunrise-1k-hdr.jpg
-├── model-new.glb          # file SketchUp mới, chỉ tồn tại trước preview
-├── model.glb
-├── model-source-backup.glb # bản sao cục bộ, không đưa lên Git
-├── package.json
-├── package-lock.json
-├── scripts/
-└── README.md
-```
+## Cài đặt
 
-Không đổi tên hoặc di chuyển `model.glb`: trang đang tải model bằng đường dẫn tương đối `./model.glb`.
-
-## Chạy thử trên máy
-
-Không mở trực tiếp `index.html` bằng đường dẫn `file://`, vì trình duyệt có thể chặn việc tải model. Hãy chạy một static server trong thư mục dự án rồi mở địa chỉ được in ra.
-
-### Dùng Python
+Yêu cầu Node.js 18 trở lên:
 
 ```bash
-python -m http.server 8000
+npm install
 ```
 
-Mở [http://localhost:8000](http://localhost:8000).
+Không cần Blender, React, framework, Git LFS hoặc build frontend.
 
-Nếu máy dùng lệnh `py` thay cho `python`:
-
-```bash
-py -m http.server 8000
-```
-
-Để dừng server, nhấn `Ctrl+C` trong cửa sổ terminal.
-
-## Quy trình preview và deploy an toàn
-
-Quy trình khuyến nghị:
+## Workflow cơ bản
 
 ```text
-SketchUp
+GLB nguồn ở bất kỳ vị trí nào
 ↓
-Xuất model-new.glb
+npm run publish -- "<source.glb>"
+↓
+preflight
+↓
+viewer-safe optimization
+↓
+validation
+↓
+dist/current
 ↓
 npm run preview
 ↓
-Điều chỉnh Preview Lighting Studio
-↓
-Save Lighting
-↓
-Kiểm tra trực quan / chỉnh UI nếu cần
-↓
-APPROVED
-↓
-npm run deploy
+viewer?model=./dist/current/model.glb
 ```
 
-### Preview trên máy
+### 1. Publish
+
+Ví dụ Windows:
+
+```bash
+npm run publish -- "D:\Models\villa.glb"
+```
+
+Đường dẫn tương đối cũng được hỗ trợ:
+
+```bash
+npm run publish -- ".\exports\interior.glb"
+```
+
+Source không cần đổi tên hoặc chép vào project. Publisher chỉ đọc source và tạo một bản làm việc trong thư mục tạm riêng. Source không bị ghi đè, đổi tên hay xóa.
+
+Publish thực hiện:
+
+1. Kiểm tra đường dẫn, phần mở rộng và GLB header.
+2. Chạy Khronos glTF Validator trên source.
+3. Kiểm tra scene, primitive, số liệu không hữu hạn và world bounds.
+4. Báo center, size, khoảng cách tới origin, texture và extension.
+5. Chạy profile tối ưu `viewer-safe`.
+6. Kiểm định candidate trước/sau.
+7. Chỉ sau khi mọi kiểm định thành công mới thay `dist/current`.
+
+Nếu publish thất bại, artifact thành công trước đó trong `dist/current` được giữ nguyên.
+
+### 2. Output
+
+```text
+dist/
+└── current/
+    ├── model.glb
+    └── metadata.json
+```
+
+`metadata.json` chứa SHA-256, kích thước byte, counts, bounds, texture summary, extensions, profile và validation warnings. File không chứa timestamp, processing time, đường dẫn máy, Git metadata hoặc nhãn do AI tạo.
+
+Trong `dist/`, chỉ `dist/current/model.glb` và `dist/current/metadata.json` được phép đưa lên Git để GitHub Pages phục vụ đúng artifact đã kiểm định. Các artifact tạm hoặc output khác trong `dist/` vẫn bị loại khỏi Git. Deploy adapter đồng thời chép model đã kiểm định sang `model.glb` ở project root để giữ fallback tương thích cũ.
+
+### 3. Preview
+
+Sau khi publish thành công:
 
 ```bash
 npm run preview
 ```
 
-Nếu có `model-new.glb`, lệnh này tự phát hiện file, sao lưu thành `model-source-backup.glb`, tối ưu và tạo `model.glb` cho website. `model-new.glb` không bị thay đổi trong lúc xử lý và chỉ bị xóa sau khi tối ưu cùng toàn bộ validation thành công. Nếu xử lý thất bại, file nguồn vẫn còn nguyên để có thể sửa lỗi hoặc chạy lại.
+Preview mở:
 
-Sau đó preview mở static server tại [http://localhost:8000](http://localhost:8000). Server tiếp tục chạy cho đến khi nhấn `Ctrl+C`. Khi `model-new.glb`, `model.glb`, `index.html`, `styles.css`, `app.js` hoặc file trong `assets/` thay đổi, preview tự kiểm tra lại và yêu cầu trình duyệt refresh. Nếu không có `model-new.glb`, preview kiểm tra `model.glb` hiện tại như bình thường.
+```text
+http://localhost:8000/?model=./dist/current/model.glb
+```
 
-Preview không commit, không push và không thay đổi repository GitHub. Sau mỗi lần kiểm tra thành công, workflow lưu một biên nhận cục bộ trong `.preview-validation.json`; file này được loại khỏi Git.
+Preview chỉ phục vụ artifact đã publish. Nó không:
 
-Trong preview, góc trên bên phải có **Preview Lighting Studio** với các điều khiển exposure, độ đậm/mềm của bóng, góc xoay môi trường và preset Neutral/Studio/Soft/Outdoor/Warm. Các thay đổi hiển thị ngay lập tức. Nút **Save Lighting** ghi lựa chọn vào `lighting-config.json` và cập nhật các giá trị lighting mặc định của viewer.
+- tìm hoặc tối ưu `model-new.glb`;
+- ghi đè/xóa GLB nguồn;
+- thay `dist/current/model.glb`;
+- commit hoặc push Git.
 
-Panel này chỉ được server preview chèn tạm thời vào trang trả về; nó không nằm trong `index.html` và không xuất hiện trên GitHub Pages. `npm run deploy` đọc `lighting-config.json`, xác nhận các giá trị đã được bake vào `<model-viewer>`, rồi mới thực hiện validation và deploy.
+Preview vẫn chèn Lighting Studio cục bộ. Save Lighting chỉ ghi `lighting-config.json` và bake thuộc tính ánh sáng vào production viewer; không chỉnh model, material hoặc texture.
 
-### Deploy an toàn
+Để không tự mở trình duyệt:
 
-Sau khi đã xem preview và chấp thuận kết quả, chạy:
+```bash
+npm run preview -- --no-open
+```
+
+Đổi port bằng biến môi trường `PREVIEW_PORT` nếu cần.
+
+## Viewer model parameter
+
+Viewer hỗ trợ:
+
+```text
+?model=<relative-or-http-url>
+```
+
+Ví dụ:
+
+```text
+http://localhost:8000/?model=./dist/current/model.glb
+https://example.com/viewer/?model=https://cdn.example.com/villa.glb
+```
+
+Chỉ URL `http:` và `https:` được chấp nhận. GLB ở domain khác phải được server nguồn cho phép CORS. Khi không có tham số `model`, viewer giữ fallback tương thích cũ là `./model.glb`.
+
+Spatial sketch reference dùng URL model đã resolve làm identity thay vì giả định `surface:model.glb`.
+
+## Profile tối ưu viewer-safe
+
+Optimizer hiện làm:
+
+- deduplicate material bằng so sánh sâu, chỉ bỏ qua tên exporter;
+- join primitive tương thích trong cùng mesh;
+- prune resource không dùng;
+- deduplicate accessor, mesh, texture và material;
+- resize texture lớn hơn 2048 px, giữ tỷ lệ;
+- chuyển JPEG/PNG sang WebP;
+- dùng quality 82 cho texture màu sRGB;
+- dùng WebP lossless cho data texture;
+- giữ nguyên rendered triangle count.
+
+WebP effort dùng thang 0–100 của glTF Transform và được đặt thành 100, tương ứng effort 6 của Sharp/libwebp.
+
+Profile chưa dùng Draco, Meshopt, KTX2, LOD hoặc geometry simplification.
+
+## Validation
+
+Preflight và candidate validation kiểm tra:
+
+- GLB 2.0 header/chunk hợp lệ;
+- Khronos glTF Validator không có error;
+- có scene và ít nhất một scene-reachable primitive với POSITION;
+- accessor không chứa NaN/Infinity;
+- bounds hữu hạn;
+- rendered triangle count không đổi;
+- bounds trước/sau không dịch chuyển vượt tolerance;
+- core material factors vẫn tồn tại;
+- transparency được giữ khi có unique texture identity đáng tin cậy;
+- output texture không vượt giới hạn profile;
+- optimizer không thêm required extension ngoài allowlist của profile.
+
+Model có kích thước hoặc vị trí bất thường chỉ tạo warning nếu vẫn có thể publish an toàn.
+
+## Repeatability
+
+Với cùng source, cùng dependency lockfile, cùng môi trường và cùng profile, chạy publish hai lần phải cho cùng:
+
+- SHA-256 của `dist/current/model.glb`;
+- nội dung/SHA-256 của `dist/current/metadata.json`.
+
+Native codec có thể cho output khác giữa hệ điều hành hoặc phiên bản Sharp/libwebp khác nhau. `package-lock.json` cần được giữ để cố định dependency cho mỗi môi trường.
+
+## Deploy GitHub Pages
+
+Sau khi publish và review bằng preview:
 
 ```bash
 npm run deploy
 ```
 
-`deploy` chỉ tiếp tục nếu biên nhận preview khớp chính xác với model, viewer và assets hiện tại. Nếu bất kỳ file trực quan nào đổi sau preview, validation thất bại hoặc `model.glb` vượt 100 MiB, lệnh dừng trước commit/push và yêu cầu chạy preview lại.
+Deploy là adapter riêng, không phải publisher. Nó:
 
-Với mọi yêu cầu chỉnh ánh sáng, mặc định chỉ preview: không commit, push hoặc deploy. Chỉ khi người dùng nói rõ `APPROVED` mới được phép commit và deploy các thay đổi ánh sáng.
+1. Xác minh `dist/current` khớp metadata.
+2. Yêu cầu preview receipt còn khớp.
+3. Chép artifact đã kiểm định sang `./model.glb` theo cơ chế rollback an toàn.
+4. Kiểm tra production viewer bằng local static server.
+5. Chỉ stage allowlist file của project.
+6. Commit `dist/current/model.glb`, `dist/current/metadata.json` cùng các file production cần thiết rồi push `origin/main`.
+7. In URL viewer, model và metadata chính xác, kèm cache key lấy từ SHA-256 của output.
 
-Quy trình sẽ tự động:
+Phần này vẫn cố ý phụ thuộc Git, branch `main`, remote `origin`, giới hạn file 100 MiB và cấu trúc URL GitHub Pages. Đây là adapter legacy, không nằm trong publisher core.
 
-1. Ưu tiên phát hiện file SketchUp mới tên `model-new.glb`.
-2. Sao lưu chính xác file nguồn thành `model-source-backup.glb` trước khi xử lý.
-3. Tối ưu nguồn mới và tạo `model.glb`; chỉ xóa `model-new.glb` sau khi thành công.
-4. Phân tích dung lượng, metadata, material, primitive, texture và dữ liệu không dùng.
-5. Giữ nguyên hình học và số tam giác hiển thị, gộp material/primitive tương thích, dọn dữ liệu thừa, chuyển texture phù hợp sang WebP và giới hạn texture ở 2048 px.
-6. Kiểm tra chuẩn glTF, transparency, số tam giác và đường dẫn `index.html` → `./model.glb` bằng static server cục bộ.
-7. Xác nhận lại nội dung vẫn trùng với phiên bản preview đã duyệt.
-8. Chặn commit nếu bất kỳ file nào vượt 100 MiB hoặc validation thất bại.
-9. Commit và push lên branch `main`, rồi in đường dẫn GitHub Pages.
+Để bật GitHub Pages: vào **Settings → Pages → Deploy from a branch**, chọn branch **main** và thư mục **/ (root)**.
 
-Không cần Blender, Git LFS hoặc lệnh Git thủ công. File sao lưu nguồn chỉ nằm trên máy và được loại khỏi Git bằng `.gitignore`.
-
-## Đưa project lên GitHub
-
-### 1. Tạo repository
-
-1. Đăng nhập GitHub và chọn **New repository**.
-2. Nhập tên repository, ví dụ `3d-model-viewer`.
-3. Chọn **Public** (GitHub Pages trên tài khoản miễn phí cần repository công khai).
-4. Không chọn tạo sẵn README, `.gitignore` hoặc license vì project đã có file.
-5. Chọn **Create repository**.
-
-### 2. Khởi tạo Git và push lên branch `main`
-
-Trong terminal, tại thư mục project, chạy các lệnh sau. Thay `YOUR_USERNAME` và `3d-model-viewer` bằng thông tin repository của bạn.
-
-```bash
-git init
-git add .gitignore index.html styles.css app.js README.md model.glb package.json package-lock.json scripts
-git commit -m "Create static 3D model viewer"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/3d-model-viewer.git
-git push -u origin main
-```
-
-> **Lưu ý về kích thước model:** Chỉ `model.glb` đã tối ưu được đưa lên Git. `model-new.glb` và `model-source-backup.glb` là file nguồn/sao lưu cục bộ và đều được loại khỏi Git bằng `.gitignore`.
-
-### 3. Bật GitHub Pages
-
-1. Mở repository trên GitHub.
-2. Vào **Settings** → **Pages**.
-3. Trong **Build and deployment**, chọn **Deploy from a branch**.
-4. Chọn branch **main** và thư mục **/ (root)**.
-5. Chọn **Save** và đợi GitHub hoàn tất deploy.
-
-### 4. Đường dẫn sau khi deploy
-
-Với repository tên `3d-model-viewer`, website thường có địa chỉ:
+Project site có dạng:
 
 ```text
-https://YOUR_USERNAME.github.io/3d-model-viewer/
+https://YOUR_USERNAME.github.io/REPOSITORY/
 ```
 
-Nếu repository có tên chính xác là `YOUR_USERNAME.github.io`, địa chỉ sẽ là:
+Với repository hiện tại, URL kiểm thử trên thiết bị khác là:
 
 ```text
-https://YOUR_USERNAME.github.io/
+https://ktsnminhtri-wq.github.io/3d-viewer-template/?model=./dist/current/model.glb&v=<output-sha-short>
 ```
 
-## File nguồn và quy trình tối ưu
+Tham số `v` được viewer chuyển tiếp vào request tải GLB, giúp tránh cache model cũ. SHA rút gọn được in tự động sau mỗi lần deploy. GitHub Pages có thể cần vài phút sau khi push để cập nhật; nếu vẫn thấy bản cũ, mở URL mới được in ra hoặc refresh mạnh/xóa cache của trình duyệt.
 
-Xuất model mới từ SketchUp với tên `model-new.glb`. Workflow không còn dùng `model-original.glb` làm nguồn. `model-source-backup.glb` là bản sao nguyên trạng gần nhất, còn `model.glb` là kết quả đã tối ưu dùng cho website.
-
-Các gói Node.js chỉ phục vụ việc tái tạo và kiểm tra bản tối ưu; website vẫn hoàn toàn tĩnh và không có build step. Sau khi chạy `npm install`, có thể dùng:
+## Kiểm thử một GLB thứ hai
 
 ```bash
-npm run optimize:model
-npm run validate:model
+npm run publish -- "D:\Models\tower.glb"
 npm run preview
-npm run deploy
 ```
 
-Lệnh `npm run optimize:model` đọc `model-source-backup.glb` và ghi bản thử nghiệm thành `model-optimized.glb`; nó không tự ghi đè `model.glb`. Quy trình nhập tự động từ `model-new.glb` được thực hiện bởi `npm run preview`.
+Kiểm tra `dist/current/metadata.json`, mở URL preview được in ra, thử orbit/zoom, material, transparency, 2P/3P và spatial sketch. Source `D:\Models\tower.glb` phải giữ nguyên SHA, tên và vị trí.
 
-## Ghi chú
+## Giới hạn đã biết
 
-- `index.html`, `styles.css`, `app.js` và `model.glb` đều được tham chiếu bằng đường dẫn tương đối, phù hợp với GitHub Pages dạng project site.
-- Thư viện Google `<model-viewer>` được tải từ CDN, nên người xem cần có kết nối Internet khi mở trang.
-- Vật liệu và texture WebP nhúng trong GLB được hiển thị trực tiếp; website không ghi đè vật liệu của model.
-- Model dung lượng lớn có thể cần thêm thời gian tải trên mạng di động. Trang hiển thị phần trăm tải trong thời gian chờ.
+- GLB có external resource tương đối nằm trong cùng thư mục source được chép vào workspace và embed lại; URL resource từ xa hoặc đường dẫn thoát khỏi thư mục source bị từ chối.
+- Chưa có visual regression bằng screenshot.
+- Transparency chỉ được so sánh nghiêm ngặt khi texture có tên duy nhất đáng tin cậy; trường hợp khác được ghi warning.
+- Byte-for-byte determinism được bảo đảm trong môi trường đã kiểm thử, không cam kết giữa các phiên bản native codec khác nhau.
+- Viewer và sketch vẫn tải model-viewer/Three.js từ CDN, nên preview UI cần Internet.
+- GitHub deploy vẫn là adapter một repository; publisher core không có coupling Git/GitHub.

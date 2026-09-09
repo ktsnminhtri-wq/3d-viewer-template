@@ -1,4 +1,6 @@
 import { writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   Logger,
   NodeIO,
@@ -8,18 +10,12 @@ import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
 import {
   compressTexture,
   dedup,
+  getTextureColorSpace,
   join,
-  listTextureSlots,
   prune,
 } from "@gltf-transform/functions";
 import sharp from "sharp";
-
-const INPUT = process.argv[2] ?? "./model-source-backup.glb";
-const OUTPUT = process.argv[3] ?? "./model-optimized.glb";
-const REPORT = process.argv[4] ?? "./optimization-transform-report.json";
-
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
-io.setLogger(new Logger(Logger.Verbosity.WARN));
+import { VIEWER_SAFE_PROFILE } from "./publisher-profile.mjs";
 
 function countPrimitiveTriangles(primitive) {
   const count = primitive.getIndices()?.getCount()
@@ -71,111 +67,142 @@ function collectStats(document) {
   };
 }
 
-function isDataTexture(texture) {
-  return listTextureSlots(texture).some((slot) => (
-    /normal|occlusion|metallic|roughness|transmission|thickness|specular/i.test(slot)
-  ));
-}
+export async function optimizeModel({
+  inputPath,
+  outputPath,
+  reportPath = null,
+  profile = VIEWER_SAFE_PROFILE,
+} = {}) {
+  if (!inputPath || !outputPath) {
+    throw new Error("optimizeModel requires explicit inputPath and outputPath.");
+  }
+  if (profile.name !== "viewer-safe") {
+    throw new Error(`Unsupported optimization profile: ${profile.name}`);
+  }
 
-console.info(`Reading ${INPUT}...`);
-const document = await io.read(INPUT);
-const before = collectStats(document);
-console.info("Before transforms:", before);
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  io.setLogger(new Logger(Logger.Verbosity.WARN));
+  console.info(`Reading ${inputPath}...`);
+  const document = await io.read(inputPath);
+  const before = collectStats(document);
+  console.info("Before transforms:", before);
 
-// Exporters often create unique names for otherwise identical materials.
-await document.transform(
-  dedup({
-    keepUniqueNames: false,
-    propertyTypes: [PropertyType.MATERIAL],
-  }),
-);
-
-// Join compatible primitives only within their existing mesh. Object names,
-// transforms, hierarchy, instancing, and rendered triangle count are preserved.
-await document.transform(
-  join({
-    keepMeshes: true,
-    keepNamed: false,
-    cleanup: false,
-  }),
-  prune({
-    keepAttributes: true,
-    keepExtras: false,
-    keepLeaves: false,
-    keepSolidTextures: true,
-  }),
-  dedup({
-    keepUniqueNames: false,
-    propertyTypes: [
-      PropertyType.ACCESSOR,
-      PropertyType.MESH,
-      PropertyType.TEXTURE,
-      PropertyType.MATERIAL,
-    ],
-  }),
-);
-
-// Avoid generation loss on already-compliant WebP textures. Color textures use
-// quality 82; data textures use lossless WebP. Any image over 2048 px is resized.
-for (const texture of document.getRoot().listTextures()) {
-  const image = texture.getImage();
-  if (!image) continue;
-
-  const mimeType = texture.getMimeType();
-  if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) continue;
-
-  const metadata = await sharp(image).metadata();
-  const oversized = Math.max(metadata.width ?? 0, metadata.height ?? 0) > 2048;
-  const needsWebP = mimeType !== "image/webp";
-  if (!oversized && !needsWebP) continue;
-
-  const dataTexture = isDataTexture(texture);
-  await compressTexture(texture, {
-    encoder: sharp,
-    targetFormat: "webp",
-    effort: 6,
-    ...(oversized ? { resize: [2048, 2048] } : {}),
-    ...(dataTexture ? { lossless: true } : { quality: 82 }),
-  });
-}
-
-// WebP image payloads must be declared through EXT_texture_webp. The
-// single-texture helper changes the MIME type but does not add the document
-// extension automatically.
-if (document.getRoot().listTextures().some((texture) => texture.getMimeType() === "image/webp")) {
-  const existingWebPExtension = document
-    .getRoot()
-    .listExtensionsUsed()
-    .find((extension) => extension.extensionName === EXTTextureWebP.EXTENSION_NAME);
-  (existingWebPExtension ?? document.createExtension(EXTTextureWebP)).setRequired(true);
-}
-
-await document.transform(
-  dedup({
-    keepUniqueNames: false,
-    propertyTypes: [PropertyType.TEXTURE, PropertyType.MATERIAL],
-  }),
-  prune({
-    keepAttributes: true,
-    keepExtras: false,
-    keepLeaves: false,
-    keepSolidTextures: true,
-  }),
-);
-
-const after = collectStats(document);
-if (after.sceneTriangles !== before.sceneTriangles) {
-  throw new Error(
-    `Rendered scene triangle count changed from ${before.sceneTriangles} to ${after.sceneTriangles}. Refusing output.`,
+  // Ignore exporter-generated names, but retain all render properties, texture
+  // relationships, extensions, and extras when comparing materials.
+  await document.transform(
+    dedup({
+      keepUniqueNames: false,
+      propertyTypes: [PropertyType.MATERIAL],
+    }),
   );
+
+  // Preserve Mesh/Node boundaries and join only compatible Primitives within
+  // their existing Mesh.
+  await document.transform(
+    join({
+      keepMeshes: true,
+      keepNamed: false,
+      cleanup: false,
+    }),
+    prune({
+      keepAttributes: true,
+      keepExtras: false,
+      keepLeaves: false,
+      keepSolidTextures: true,
+    }),
+    dedup({
+      keepUniqueNames: false,
+      propertyTypes: [
+        PropertyType.ACCESSOR,
+        PropertyType.MESH,
+        PropertyType.TEXTURE,
+        PropertyType.MATERIAL,
+      ],
+    }),
+  );
+
+  for (const texture of document.getRoot().listTextures()) {
+    const image = texture.getImage();
+    if (!image) continue;
+
+    const mimeType = texture.getMimeType();
+    if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) continue;
+
+    const metadata = await sharp(image).metadata();
+    const oversized = Math.max(metadata.width ?? 0, metadata.height ?? 0)
+      > profile.maxTextureSize;
+    const needsWebP = mimeType !== "image/webp";
+    if (!oversized && !needsWebP) continue;
+
+    const colorTexture = getTextureColorSpace(texture) === "srgb";
+    await compressTexture(texture, {
+      encoder: sharp,
+      targetFormat: "webp",
+      // glTF Transform uses a 0-100 effort scale and maps 100 to Sharp's WebP
+      // effort 6. The previous value 6 effectively mapped to effort 0.
+      effort: profile.webpEffort,
+      ...(oversized
+        ? { resize: [profile.maxTextureSize, profile.maxTextureSize] }
+        : {}),
+      ...(colorTexture
+        ? { quality: profile.colorTextureQuality }
+        : { lossless: true }),
+    });
+  }
+
+  if (document.getRoot().listTextures().some((texture) => texture.getMimeType() === "image/webp")) {
+    const existingWebPExtension = document
+      .getRoot()
+      .listExtensionsUsed()
+      .find((extension) => extension.extensionName === EXTTextureWebP.EXTENSION_NAME);
+    (existingWebPExtension ?? document.createExtension(EXTTextureWebP)).setRequired(true);
+  }
+
+  await document.transform(
+    dedup({
+      keepUniqueNames: false,
+      propertyTypes: [PropertyType.TEXTURE, PropertyType.MATERIAL],
+    }),
+    prune({
+      keepAttributes: true,
+      keepExtras: false,
+      keepLeaves: false,
+      keepSolidTextures: true,
+    }),
+  );
+
+  const after = collectStats(document);
+  if (profile.preserveRenderedTriangles && after.sceneTriangles !== before.sceneTriangles) {
+    throw new Error(
+      `Rendered scene triangle count changed from ${before.sceneTriangles} to ${after.sceneTriangles}. Refusing output.`,
+    );
+  }
+
+  console.info("After transforms:", after);
+  console.info(`Writing ${outputPath}...`);
+  await io.write(outputPath, document);
+  if (reportPath) {
+    await writeFile(
+      reportPath,
+      `${JSON.stringify({
+        profile: profile.name,
+        input: path.basename(inputPath),
+        output: path.basename(outputPath),
+        before,
+        after,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+  }
+  console.info("Optimization completed successfully without geometry simplification.");
+  return { before, after };
 }
 
-console.info("After transforms:", after);
-console.info(`Writing ${OUTPUT}...`);
-await io.write(OUTPUT, document);
-await writeFile(
-  REPORT,
-  `${JSON.stringify({ input: INPUT, output: OUTPUT, before, after }, null, 2)}\n`,
-  "utf8",
-);
-console.info("Optimization completed successfully without geometry simplification.");
+const isCLI = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isCLI) {
+  const inputPath = process.argv[2] ?? "./model-source-backup.glb";
+  const outputPath = process.argv[3] ?? "./model-optimized.glb";
+  const reportPath = process.argv[4] ?? "./optimization-transform-report.json";
+  await optimizeModel({ inputPath, outputPath, reportPath });
+}

@@ -1,7 +1,7 @@
 import * as THREE from "https://unpkg.com/three@0.174.0/build/three.module.js";
 import {
-  PRIMARY_MODEL_SURFACE_ID,
   REFERENCE_TYPES,
+  createModelSurfaceId,
   createSpatialReferenceStore,
   createStrokeRecord,
   isStrokeReferenceVisible,
@@ -12,6 +12,12 @@ const modelViewer = document.querySelector("#modelViewer");
 const viewerShell = document.querySelector("#viewerShell");
 
 if (modelViewer && viewerShell) {
+  const requestedModelSource = new URLSearchParams(window.location.search).get("model")
+    || modelViewer.dataset.defaultModel
+    || "./model.glb";
+  const primaryModelSource = modelViewer.dataset.modelIdentity
+    || new URL(requestedModelSource, document.baseURI).href;
+  const primaryModelSurfaceId = createModelSurfaceId(primaryModelSource);
   const canvas = document.createElement("canvas");
   canvas.className = "sketch-overlay";
   canvas.setAttribute("aria-hidden", "true");
@@ -107,6 +113,8 @@ if (modelViewer && viewerShell) {
   const guideVisuals = new Map();
   const references = createSpatialReferenceStore({
     onReferenceChange: handleReferenceChange,
+    primarySurfaceId: primaryModelSurfaceId,
+    primarySurfaceSource: primaryModelSource,
   });
   const guideGeometry = new THREE.PlaneGeometry(1, 1);
   const guideMaterial = new THREE.ShaderMaterial({
@@ -178,7 +186,7 @@ if (modelViewer && viewerShell) {
   const inverseTargetMatrix = new THREE.Matrix4();
   const activeDrawingSupport = {
     type: REFERENCE_TYPES.SURFACE,
-    id: PRIMARY_MODEL_SURFACE_ID,
+    id: primaryModelSurfaceId,
   };
   let activeStroke = null;
   let activePenId = null;
@@ -658,7 +666,7 @@ if (modelViewer && viewerShell) {
   function createSurfaceStroke() {
     return createRenderableStroke(
       REFERENCE_TYPES.SURFACE,
-      PRIMARY_MODEL_SURFACE_ID,
+      primaryModelSurfaceId,
     );
   }
 
@@ -1614,7 +1622,7 @@ if (modelViewer && viewerShell) {
   modelSupportButton.addEventListener("click", () => {
     setActiveDrawingSupport(
       REFERENCE_TYPES.SURFACE,
-      PRIMARY_MODEL_SURFACE_ID,
+      primaryModelSurfaceId,
     );
   });
 
@@ -1682,7 +1690,7 @@ if (modelViewer && viewerShell) {
       surfaceOffset,
       strokeCount: strokes.length,
       renderObjectCount: strokeRenderStates.size,
-      primarySurfaceReferenceId: PRIMARY_MODEL_SURFACE_ID,
+      primarySurfaceReferenceId: primaryModelSurfaceId,
     }),
   });
 

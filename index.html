@@ -22,7 +22,7 @@
     <main class="viewer-shell" id="viewerShell">
       <model-viewer
         id="modelViewer"
-        src="./model.glb"
+        data-default-model="./model.glb"
         alt="Mô hình 3D tương tác"
         camera-controls
         touch-action="none"
@@ -61,7 +61,7 @@
       <section class="error-panel" id="errorPanel" role="alert" hidden>
         <strong>Không thể tải mô hình 3D</strong>
         <p>
-          Hãy kiểm tra file <code>model.glb</code> nằm cùng thư mục với
+          Hãy kiểm tra model <code id="modelPathHint">./model.glb</code> có thể truy cập được từ
           <code>index.html</code>, rồi tải lại trang.
         </p>
         <button class="retry-button" id="retryButton" type="button">Tải lại</button>
