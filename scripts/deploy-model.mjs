@@ -22,6 +22,7 @@ const PUBLISHED_MODEL_GIT_PATH = "dist/current/model.glb";
 const PUBLISHED_METADATA_GIT_PATH = "dist/current/metadata.json";
 const DEPLOY_PATHS = [
   ".gitignore",
+  ".nojekyll",
   "AGENTS.md",
   "README.md",
   "package.json",

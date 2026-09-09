@@ -75,6 +75,8 @@ dist/
 
 Trong `dist/`, chỉ `dist/current/model.glb` và `dist/current/metadata.json` được phép đưa lên Git để GitHub Pages phục vụ đúng artifact đã kiểm định. Các artifact tạm hoặc output khác trong `dist/` vẫn bị loại khỏi Git. Deploy adapter đồng thời chép model đã kiểm định sang `model.glb` ở project root để giữ fallback tương thích cũ.
 
+File `.nojekyll` ở root yêu cầu GitHub Pages phục vụ trực tiếp website tĩnh và các binary GLB, không đưa cây output qua bước xử lý Jekyll.
+
 ### 3. Preview
 
 Sau khi publish thành công:
