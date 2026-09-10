@@ -42,6 +42,7 @@ const DEPLOY_PATHS = [
   "assets/spruit-sunrise-1k-hdr.jpg",
   "scripts/deploy-model.mjs",
   "scripts/glb-utils.mjs",
+  "scripts/khronos-validator-worker.mjs",
   "scripts/lighting-config.mjs",
   "scripts/optimize-model.mjs",
   "scripts/preview-server.mjs",

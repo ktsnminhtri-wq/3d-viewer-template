@@ -35,12 +35,22 @@ function sortIssues(issues) {
 }
 
 export async function runKhronosValidation(filePath, { projectRoot = DEFAULT_PROJECT_ROOT } = {}) {
-  const cliPath = path.join(projectRoot, "node_modules", "@gltf-transform", "cli", "bin", "cli.js");
-  const result = await run(process.execPath, [cliPath, "validate", filePath], { cwd: projectRoot });
-  if (result.code !== 0 || !/No errors found\./i.test(result.stdout)) {
+  const workerPath = path.join(projectRoot, "scripts", "khronos-validator-worker.mjs");
+  const result = await run(process.execPath, [
+    "--max-old-space-size=8192",
+    workerPath,
+    filePath,
+  ], { cwd: projectRoot });
+  let report;
+  try {
+    report = JSON.parse(result.stdout);
+  } catch {
+    report = null;
+  }
+  if (result.code !== 0 || !report || report.numErrors > 0) {
     throw new Error(`Khronos glTF validation failed for ${path.basename(filePath)}.\n${result.stdout}${result.stderr}`);
   }
-  return { passed: true };
+  return { passed: true, ...report };
 }
 
 export function evaluatePublishability(analysis, {

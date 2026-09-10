@@ -67,6 +67,48 @@ function collectStats(document) {
   };
 }
 
+function normalizeJoinedNormals(document) {
+  const visited = new Set();
+  let normalizedVectors = 0;
+  let zeroLengthVectors = 0;
+
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const normal = primitive.getAttribute("NORMAL");
+      if (!normal || visited.has(normal)) continue;
+      visited.add(normal);
+      const array = normal.getArray();
+      if (!(array instanceof Float32Array)) continue;
+
+      let modified = false;
+      for (let index = 0; index < array.length; index += 3) {
+        const x = array[index];
+        const y = array[index + 1];
+        const z = array[index + 2];
+        const length = Math.hypot(x, y, z);
+        if (!Number.isFinite(length) || length <= 1e-12) {
+          zeroLengthVectors += 1;
+          continue;
+        }
+        if (Math.abs(length - 1) <= 1e-6) continue;
+        array[index] = x / length;
+        array[index + 1] = y / length;
+        array[index + 2] = z / length;
+        normalizedVectors += 1;
+        modified = true;
+      }
+      if (modified) normal.setArray(array);
+    }
+  }
+
+  if (zeroLengthVectors > 0) {
+    throw new Error(`Join produced ${zeroLengthVectors} zero-length normal vectors.`);
+  }
+  if (normalizedVectors > 0) {
+    console.info(`Normalized ${normalizedVectors} transformed normal vectors after join.`);
+  }
+}
+
 export async function optimizeModel({
   inputPath,
   outputPath,
@@ -120,6 +162,7 @@ export async function optimizeModel({
       ],
     }),
   );
+  normalizeJoinedNormals(document);
 
   for (const texture of document.getRoot().listTextures()) {
     const image = texture.getImage();

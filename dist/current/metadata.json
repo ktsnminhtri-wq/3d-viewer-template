@@ -1,62 +1,63 @@
 {
   "schemaVersion": 1,
   "source": {
-    "name": "tower.glb",
-    "sizeBytes": 70797932,
-    "sha256": "c41d9c63e8b14ba4cfdf589cc16fbb2648461486642cc4761ad4706ef01ad709"
+    "name": "5towers.glb",
+    "sizeBytes": 202560184,
+    "sha256": "c3542a6157827e73be53702682ae1a10ddccd7732e366ccb8c1c10f9eef4f70b"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 12711140,
-    "sha256": "c25ad0db05ca1c2dca7840573d6db30f10e8396ffb7c68b65a3989b4ff1f0136"
+    "sizeBytes": 53796848,
+    "sha256": "a81ccee0d1765da5d6a7241f3c5020b9235974a0f9c52ef568e11bec5f0a9dfc"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 10147,
-    "meshes": 636,
-    "primitives": 1013,
-    "storedTriangles": 74934,
-    "renderedTriangles": 406868,
-    "materials": 117,
-    "textures": 29,
+    "nodes": 40189,
+    "meshes": 2021,
+    "primitives": 2021,
+    "storedTriangles": 1228034,
+    "renderedTriangles": 3383426,
+    "materials": 76,
+    "textures": 19,
     "animations": 0
   },
   "bounds": {
     "min": [
-      135.050843582,
-      -44.100005326,
-      -210.544395225
+      -1353.475064287,
+      -9.500000461,
+      -1539.549106194
     ],
     "max": [
-      246.539727209,
-      65.545001903,
-      -93.673338807
+      1646.524986275,
+      161.158693439,
+      1460.450944368
     ],
     "size": [
-      111.488883627,
-      109.645007229,
-      116.871056418
+      3000.000050562,
+      170.658693901,
+      3000.000050562
     ],
     "center": [
-      190.795285396,
-      10.722498288,
-      -152.108867016
+      146.524960994,
+      75.829346489,
+      -39.549080913
     ],
-    "distanceFromOrigin": 244.24356762
+    "distanceFromOrigin": 169.657843274
   },
   "textures": {
-    "totalBytes": 4682726,
+    "totalBytes": 5413528,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
-    "maxHeight": 2000,
-    "transparentCount": 0
+    "maxHeight": 2048,
+    "transparentCount": 3
   },
   "extensions": {
     "used": [
-      "EXT_texture_webp"
+      "EXT_texture_webp",
+      "KHR_materials_pbrSpecularGlossiness"
     ],
     "required": [
       "EXT_texture_webp"
@@ -73,8 +74,8 @@
     "passed": true,
     "warnings": [
       {
-        "code": "SOURCE_TEXTURE_RESIZE_REQUIRED",
-        "message": "1 texture(s) exceed 2048px."
+        "code": "TRANSPARENCY_IDENTITY_UNVERIFIABLE",
+        "message": "3 transparent texture(s) could not be matched reliably by a unique name."
       }
     ]
   }
