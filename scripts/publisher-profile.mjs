@@ -6,7 +6,7 @@ export const VIEWER_SAFE_PROFILE = Object.freeze({
   preserveRenderedTriangles: true,
   allowedAddedRequiredExtensions: Object.freeze([
     "EXT_texture_webp",
+    "EXT_mesh_gpu_instancing",
     "KHR_mesh_primitive_restart",
   ]),
 });
-

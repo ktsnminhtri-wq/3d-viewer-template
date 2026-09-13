@@ -7,18 +7,18 @@
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 40584516,
-    "sha256": "580af843300b2e99ad5e995baa9fc102720600e6af79a36cfc6432e35c04f2bf"
+    "sizeBytes": 13719804,
+    "sha256": "eb1f58b30a7a6e92f8d3c4ba9956f7ad72582f4c43b2c3573ec923afbb262fdf"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 176712,
-    "meshes": 10456,
+    "nodes": 596,
+    "meshes": 596,
     "meshInstances": 153660,
-    "primitives": 29853,
-    "drawCalls": 1359081,
-    "storedTriangles": 36869,
+    "primitives": 11261,
+    "drawCalls": 11261,
+    "storedTriangles": 32636,
     "renderedTriangles": 3306337,
     "materials": 94,
     "textures": 8,
@@ -26,26 +26,26 @@
   },
   "bounds": {
     "min": [
-      -223.218200381,
+      -223.218213347,
       -0.001367078,
-      0.525962655
+      0.525962653
     ],
     "max": [
-      229.189282681,
-      161.158676901,
-      160.159965367
+      229.189282707,
+      161.158676417,
+      160.159964868
     ],
     "size": [
-      452.407483062,
-      161.160043979,
-      159.634002712
+      452.407496055,
+      161.160043495,
+      159.634002215
     ],
     "center": [
-      2.98554115,
-      80.578654912,
-      80.342964011
+      2.98553468,
+      80.578654669,
+      80.34296376
     ],
-    "distanceFromOrigin": 113.828049924
+    "distanceFromOrigin": 113.828049405
   },
   "textures": {
     "totalBytes": 1355292,
@@ -70,6 +70,7 @@
   },
   "extensions": {
     "used": [
+      "EXT_mesh_gpu_instancing",
       "EXT_texture_webp"
     ],
     "required": [

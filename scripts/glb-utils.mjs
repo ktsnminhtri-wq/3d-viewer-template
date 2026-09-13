@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { getBounds } from "@gltf-transform/functions";
+import { getBounds, uninstance } from "@gltf-transform/functions";
 import sharp from "sharp";
 
 export const MIB = 1024 * 1024;
@@ -51,6 +51,15 @@ function collectAccessorReferences(primitive, target) {
   for (const morphTarget of primitive.targets ?? []) {
     for (const index of Object.values(morphTarget)) target.add(index);
   }
+}
+
+function nodeInstanceCount(node, accessors) {
+  const attributes = node?.extensions?.EXT_mesh_gpu_instancing?.attributes;
+  if (!attributes) return 1;
+  const counts = Object.values(attributes)
+    .map((accessorIndex) => accessors[accessorIndex]?.count ?? 0)
+    .filter((count) => count > 0);
+  return counts.length ? Math.min(...counts) : 1;
 }
 
 function collectTextureReferences(value, target, parentKey = "") {
@@ -197,9 +206,18 @@ export async function analyzeGLB(filePath) {
   }
 
   const usedMeshes = new Set();
+  const instanceAccessorIndices = new Set();
+  let meshInstances = 0;
   for (const nodeIndex of reachableNodes) {
-    const meshIndex = nodes[nodeIndex]?.mesh;
-    if (meshIndex !== undefined) usedMeshes.add(meshIndex);
+    const node = nodes[nodeIndex];
+    const meshIndex = node?.mesh;
+    if (meshIndex !== undefined) {
+      usedMeshes.add(meshIndex);
+      meshInstances += nodeInstanceCount(node, accessors);
+      for (const accessorIndex of Object.values(
+        node.extensions?.EXT_mesh_gpu_instancing?.attributes ?? {},
+      )) instanceAccessorIndices.add(accessorIndex);
+    }
   }
 
   const meshRows = [];
@@ -238,9 +256,18 @@ export async function analyzeGLB(filePath) {
   }
 
   let sceneTriangles = 0;
+  let sceneDrawCalls = 0;
   for (const nodeIndex of reachableNodes) {
-    const meshIndex = nodes[nodeIndex]?.mesh;
-    if (meshIndex !== undefined) sceneTriangles += meshTriangleCounts.get(meshIndex) ?? 0;
+    const node = nodes[nodeIndex];
+    const meshIndex = node?.mesh;
+    if (meshIndex === undefined) continue;
+    sceneTriangles += (meshTriangleCounts.get(meshIndex) ?? 0) * nodeInstanceCount(node, accessors);
+    for (const primitive of meshes[meshIndex]?.primitives ?? []) {
+      const positionIndex = primitive.attributes?.POSITION;
+      if (positionIndex !== undefined && (accessors[positionIndex]?.count ?? 0) > 0) {
+        sceneDrawCalls += 1;
+      }
+    }
   }
 
   let renderablePrimitives = 0;
@@ -254,7 +281,7 @@ export async function analyzeGLB(filePath) {
   }
 
   const usedMaterials = new Set();
-  const usedAccessors = new Set();
+  const usedAccessors = new Set(instanceAccessorIndices);
   for (const meshIndex of usedMeshes) {
     for (const primitive of meshes[meshIndex]?.primitives ?? []) {
       if (primitive.material !== undefined) usedMaterials.add(primitive.material);
@@ -350,6 +377,16 @@ export async function analyzeGLB(filePath) {
     [...usedMaterials].map((materialIndex) => JSON.stringify(materialCoreValue(materials[materialIndex]))),
   )].sort();
   const textureBytes = imageRows.reduce((sum, image) => sum + image.bytes, 0);
+  const estimatedTextureGPUBytes = imageRows.reduce((sum, image) => {
+    if (!image.width || !image.height) return sum;
+    // Browser-decoded color textures generally occupy RGBA8, plus ~1/3 for mip levels.
+    return sum + Math.ceil(image.width * image.height * 4 * 4 / 3);
+  }, 0);
+  const alphaModeCounts = { OPAQUE: 0, MASK: 0, BLEND: 0 };
+  for (const materialIndex of usedMaterials) {
+    const mode = materials[materialIndex]?.alphaMode ?? "OPAQUE";
+    alphaModeCounts[mode] = (alphaModeCounts[mode] ?? 0) + 1;
+  }
   const unused = {
     nodes: nodes.length - reachableNodes.size,
     meshes: meshes.length - usedMeshes.size,
@@ -359,6 +396,13 @@ export async function analyzeGLB(filePath) {
     images: images.length - usedImages.size,
   };
   const imageHashes = imageRows.map((image) => image.hash).filter(Boolean);
+  const invalidNumericValues = countInvalidNumericValues(root);
+  if ((gltf.extensionsUsed ?? []).includes("EXT_mesh_gpu_instancing")) {
+    // Core getBounds() does not expand EXT_mesh_gpu_instancing transforms.
+    // Expand them only in this in-memory analysis document; the GLB is untouched.
+    await document.transform(uninstance());
+  }
+  const bounds = aggregateBounds(root);
   const externalResourceURIs = [
     ...(gltf.buffers ?? []).map((buffer) => buffer.uri),
     ...images.map((image) => image.uri),
@@ -373,8 +417,10 @@ export async function analyzeGLB(filePath) {
     scenes: gltf.scenes?.length ?? 0,
     nodes: nodes.length,
     meshes: meshes.length,
+    meshInstances,
     primitives: primitiveCount,
     renderablePrimitives,
+    sceneDrawCalls,
     materials: materials.length,
     functionallyUniqueMaterials: functionalMaterialCount,
     duplicateMaterials: materials.length - functionalMaterialCount,
@@ -384,15 +430,17 @@ export async function analyzeGLB(filePath) {
     textures: textures.length,
     images: images.length,
     textureBytes,
+    estimatedTextureGPUBytes,
     textureFormats: [...new Set(imageRows.map((image) => image.mimeType).filter(Boolean))].sort(),
     maxTextureWidth: Math.max(0, ...imageRows.map((image) => image.width ?? 0)),
     maxTextureHeight: Math.max(0, ...imageRows.map((image) => image.height ?? 0)),
     transparentTextureCount: imageRows.filter((image) => image.hasTransparency).length,
+    alphaModeCounts,
     storedTriangles,
     sceneTriangles,
     averageTrianglesPerPrimitive: primitiveCount ? storedTriangles / primitiveCount : 0,
-    invalidNumericValues: countInvalidNumericValues(root),
-    bounds: aggregateBounds(root),
+    invalidNumericValues,
+    bounds,
     unused,
     oversizedTextureCount: imageRows.filter((image) => image.oversized).length,
     duplicateImageCount: imageHashes.length - new Set(imageHashes).size,

@@ -10,7 +10,9 @@ import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
 import {
   compressTexture,
   dedup,
+  flatten,
   getTextureColorSpace,
+  instance,
   join,
   prune,
 } from "@gltf-transform/functions";
@@ -36,7 +38,11 @@ function collectStats(document) {
   function visitNode(node) {
     const mesh = node.getMesh();
     if (mesh) {
-      sceneTriangles += mesh.listPrimitives().reduce(
+      const batch = node.getExtension("EXT_mesh_gpu_instancing");
+      const instanceCount = batch
+        ? Math.min(...batch.listAttributes().map((accessor) => accessor.getCount()))
+        : 1;
+      sceneTriangles += instanceCount * mesh.listPrimitives().reduce(
         (total, primitive) => total + countPrimitiveTriangles(primitive),
         0,
       );
@@ -141,9 +147,9 @@ export async function optimizeModel({
 
   if (memorySafeMetadataPath) {
     // Extremely fragmented SketchUp exports can exceed V8's maximum Set size
-    // inside join/accessor dedup. Material deduplication already removes the
-    // dominant JSON waste; keep mesh/accessor topology untouched in this path.
-    console.info("Using memory-safe metadata path; preserving mesh/accessor topology.");
+    // inside join. Deduplicate in bounded passes, flatten world transforms, and
+    // batch repeated meshes with model-viewer-compatible GPU instancing.
+    console.info("Using memory-safe instancing path; preserving rendered triangles.");
     await document.transform(
       prune({
         keepAttributes: true,
@@ -151,6 +157,16 @@ export async function optimizeModel({
         keepLeaves: false,
         keepSolidTextures: true,
       }),
+      dedup({
+        keepUniqueNames: false,
+        propertyTypes: [PropertyType.ACCESSOR],
+      }),
+      dedup({
+        keepUniqueNames: false,
+        propertyTypes: [PropertyType.MESH],
+      }),
+      flatten(),
+      instance({ min: 2 }),
     );
   } else {
     // Preserve Mesh/Node boundaries and join only compatible Primitives within
