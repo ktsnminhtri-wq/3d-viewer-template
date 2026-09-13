@@ -127,6 +127,7 @@ export async function optimizeModel({
   console.info(`Reading ${inputPath}...`);
   const document = await io.read(inputPath);
   const before = collectStats(document);
+  const memorySafeMetadataPath = before.nodes > 100_000 && before.materials > 5_000;
   console.info("Before transforms:", before);
 
   // Ignore exporter-generated names, but retain all render properties, texture
@@ -138,31 +139,46 @@ export async function optimizeModel({
     }),
   );
 
-  // Preserve Mesh/Node boundaries and join only compatible Primitives within
-  // their existing Mesh.
-  await document.transform(
-    join({
-      keepMeshes: true,
-      keepNamed: false,
-      cleanup: false,
-    }),
-    prune({
-      keepAttributes: true,
-      keepExtras: false,
-      keepLeaves: false,
-      keepSolidTextures: true,
-    }),
-    dedup({
-      keepUniqueNames: false,
-      propertyTypes: [
-        PropertyType.ACCESSOR,
-        PropertyType.MESH,
-        PropertyType.TEXTURE,
-        PropertyType.MATERIAL,
-      ],
-    }),
-  );
-  normalizeJoinedNormals(document);
+  if (memorySafeMetadataPath) {
+    // Extremely fragmented SketchUp exports can exceed V8's maximum Set size
+    // inside join/accessor dedup. Material deduplication already removes the
+    // dominant JSON waste; keep mesh/accessor topology untouched in this path.
+    console.info("Using memory-safe metadata path; preserving mesh/accessor topology.");
+    await document.transform(
+      prune({
+        keepAttributes: true,
+        keepExtras: false,
+        keepLeaves: false,
+        keepSolidTextures: true,
+      }),
+    );
+  } else {
+    // Preserve Mesh/Node boundaries and join only compatible Primitives within
+    // their existing Mesh.
+    await document.transform(
+      join({
+        keepMeshes: true,
+        keepNamed: false,
+        cleanup: false,
+      }),
+      prune({
+        keepAttributes: true,
+        keepExtras: false,
+        keepLeaves: false,
+        keepSolidTextures: true,
+      }),
+      dedup({
+        keepUniqueNames: false,
+        propertyTypes: [
+          PropertyType.ACCESSOR,
+          PropertyType.MESH,
+          PropertyType.TEXTURE,
+          PropertyType.MATERIAL,
+        ],
+      }),
+    );
+    normalizeJoinedNormals(document);
+  }
 
   for (const texture of document.getRoot().listTextures()) {
     const image = texture.getImage();
@@ -229,6 +245,7 @@ export async function optimizeModel({
       reportPath,
       `${JSON.stringify({
         profile: profile.name,
+        strategy: memorySafeMetadataPath ? "memory-safe-metadata" : "full-viewer-safe",
         input: path.basename(inputPath),
         output: path.basename(outputPath),
         before,

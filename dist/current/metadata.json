@@ -2,62 +2,75 @@
   "schemaVersion": 1,
   "source": {
     "name": "5towers.glb",
-    "sizeBytes": 202560184,
-    "sha256": "c3542a6157827e73be53702682ae1a10ddccd7732e366ccb8c1c10f9eef4f70b"
+    "sizeBytes": 60960440,
+    "sha256": "ec3a9cd7f66510c10e34997e299a4a8e572cf6c2fb4a3f0fbe842dad09e77433"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 53796848,
-    "sha256": "a81ccee0d1765da5d6a7241f3c5020b9235974a0f9c52ef568e11bec5f0a9dfc"
+    "sizeBytes": 40584516,
+    "sha256": "580af843300b2e99ad5e995baa9fc102720600e6af79a36cfc6432e35c04f2bf"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 40189,
-    "meshes": 2021,
-    "primitives": 2021,
-    "storedTriangles": 1228034,
-    "renderedTriangles": 3383426,
-    "materials": 76,
-    "textures": 19,
+    "nodes": 176712,
+    "meshes": 10456,
+    "meshInstances": 153660,
+    "primitives": 29853,
+    "drawCalls": 1359081,
+    "storedTriangles": 36869,
+    "renderedTriangles": 3306337,
+    "materials": 94,
+    "textures": 8,
     "animations": 0
   },
   "bounds": {
     "min": [
-      -1353.475064287,
-      -9.500000461,
-      -1539.549106194
+      -223.218200381,
+      -0.001367078,
+      0.525962655
     ],
     "max": [
-      1646.524986275,
-      161.158693439,
-      1460.450944368
+      229.189282681,
+      161.158676901,
+      160.159965367
     ],
     "size": [
-      3000.000050562,
-      170.658693901,
-      3000.000050562
+      452.407483062,
+      161.160043979,
+      159.634002712
     ],
     "center": [
-      146.524960994,
-      75.829346489,
-      -39.549080913
+      2.98554115,
+      80.578654912,
+      80.342964011
     ],
-    "distanceFromOrigin": 169.657843274
+    "distanceFromOrigin": 113.828049924
   },
   "textures": {
-    "totalBytes": 5413528,
+    "totalBytes": 1355292,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
     "maxHeight": 2048,
-    "transparentCount": 3
+    "transparentCount": 1,
+    "oversizedCount": 0,
+    "duplicateCount": 0,
+    "estimatedGPUBytesRGBA8WithMipmaps": 75034968
+  },
+  "materials": {
+    "alphaModeCounts": {
+      "OPAQUE": 81,
+      "MASK": 0,
+      "BLEND": 13
+    },
+    "blendedCount": 13,
+    "maskedCount": 0
   },
   "extensions": {
     "used": [
-      "EXT_texture_webp",
-      "KHR_materials_pbrSpecularGlossiness"
+      "EXT_texture_webp"
     ],
     "required": [
       "EXT_texture_webp"
@@ -72,11 +85,6 @@
   },
   "validation": {
     "passed": true,
-    "warnings": [
-      {
-        "code": "TRANSPARENCY_IDENTITY_UNVERIFIABLE",
-        "message": "3 transparent texture(s) could not be matched reliably by a unique name."
-      }
-    ]
+    "warnings": []
   }
 }
