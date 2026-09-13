@@ -30,6 +30,7 @@ const DEPLOY_PATHS = [
   "index.html",
   "styles.css",
   "app.js",
+  "instancing-camera.js",
   "sketch.css",
   "sketch-controller.js",
   "sketch-spatial-model.js",
