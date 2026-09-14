@@ -1,77 +1,77 @@
 {
   "schemaVersion": 1,
   "source": {
-    "name": "5towers.glb",
-    "sizeBytes": 60960440,
-    "sha256": "ec3a9cd7f66510c10e34997e299a4a8e572cf6c2fb4a3f0fbe842dad09e77433"
+    "name": "260914_HH&CCTP-OPTION MAI XEO.glb",
+    "sizeBytes": 90083920,
+    "sha256": "4b44de937225b3ec40cbc8520f67993c735066bff02597ca5f9d34e786b7b130"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 13719804,
-    "sha256": "eb1f58b30a7a6e92f8d3c4ba9956f7ad72582f4c43b2c3573ec923afbb262fdf"
+    "sizeBytes": 50638828,
+    "sha256": "e7913a8156942005b416d83b41ec820c1f152a22eef05ce27c18d4966d02b19d"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 596,
-    "meshes": 596,
-    "meshInstances": 153660,
-    "primitives": 11261,
-    "drawCalls": 11261,
-    "storedTriangles": 32636,
-    "renderedTriangles": 3306337,
-    "materials": 94,
-    "textures": 8,
+    "nodes": 111103,
+    "meshes": 5145,
+    "meshInstances": 51153,
+    "primitives": 5145,
+    "drawCalls": 51153,
+    "storedTriangles": 694825,
+    "renderedTriangles": 1749704,
+    "materials": 61,
+    "textures": 31,
     "animations": 0
   },
   "bounds": {
     "min": [
-      -223.218213347,
-      -0.001367078,
-      0.525962653
+      -1361.72969949,
+      -488.942398289,
+      -1542.014042078
     ],
     "max": [
-      229.189282707,
-      161.158676417,
-      160.159964868
+      1645.230987115,
+      196.657642865,
+      1464.797251818
     ],
     "size": [
-      452.407496055,
-      161.160043495,
-      159.634002215
+      3006.960686605,
+      685.600041155,
+      3006.811293896
     ],
     "center": [
-      2.98553468,
-      80.578654669,
-      80.34296376
+      141.750643813,
+      -146.142377712,
+      -38.60839513
     ],
-    "distanceFromOrigin": 113.828049405
+    "distanceFromOrigin": 207.22318345
   },
   "textures": {
-    "totalBytes": 1355292,
+    "totalBytes": 379914,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
     "maxHeight": 2048,
-    "transparentCount": 1,
+    "transparentCount": 0,
     "oversizedCount": 0,
     "duplicateCount": 0,
-    "estimatedGPUBytesRGBA8WithMipmaps": 75034968
+    "estimatedGPUBytesRGBA8WithMipmaps": 87724612
   },
   "materials": {
     "alphaModeCounts": {
-      "OPAQUE": 81,
-      "MASK": 0,
-      "BLEND": 13
+      "OPAQUE": 0,
+      "MASK": 49,
+      "BLEND": 12
     },
-    "blendedCount": 13,
-    "maskedCount": 0
+    "blendedCount": 12,
+    "maskedCount": 49
   },
   "extensions": {
     "used": [
-      "EXT_mesh_gpu_instancing",
-      "EXT_texture_webp"
+      "EXT_texture_webp",
+      "KHR_materials_pbrSpecularGlossiness"
     ],
     "required": [
       "EXT_texture_webp"
@@ -86,6 +86,11 @@
   },
   "validation": {
     "passed": true,
-    "warnings": []
+    "warnings": [
+      {
+        "code": "SOURCE_TEXTURE_RESIZE_REQUIRED",
+        "message": "3 texture(s) exceed 2048px."
+      }
+    ]
   }
 }
