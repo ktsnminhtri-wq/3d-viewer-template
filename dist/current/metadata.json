@@ -1,82 +1,81 @@
 {
   "schemaVersion": 1,
   "source": {
-    "name": "260914_HH&CCTP-OPTION MAI XEO.glb",
-    "sizeBytes": 90083920,
-    "sha256": "4b44de937225b3ec40cbc8520f67993c735066bff02597ca5f9d34e786b7b130"
+    "name": "5towers.glb",
+    "sizeBytes": 60960440,
+    "sha256": "ec3a9cd7f66510c10e34997e299a4a8e572cf6c2fb4a3f0fbe842dad09e77433"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 51897316,
-    "sha256": "b7c4f83a0c63b93296cb8a901622f3355ffaa8394d9b69fcc05794a82dd7c905"
+    "sizeBytes": 48848488,
+    "sha256": "ec927b22cd6961a6cd443edc9a2dbd3e59fbaa02338b80ce2aff6714899a56df"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 110933,
-    "meshes": 5044,
-    "meshInstances": 50983,
-    "primitives": 5044,
-    "drawCalls": 50983,
-    "storedTriangles": 694825,
-    "renderedTriangles": 1749704,
-    "materials": 61,
-    "textures": 31,
+    "nodes": 153660,
+    "meshes": 596,
+    "meshInstances": 153660,
+    "primitives": 11261,
+    "drawCalls": 1359081,
+    "storedTriangles": 32636,
+    "renderedTriangles": 3306337,
+    "materials": 94,
+    "textures": 8,
     "animations": 0
   },
   "bounds": {
     "min": [
-      -1361.72969949,
-      -488.942398289,
-      -1542.014042078
+      -223.218201671,
+      -0.001367078,
+      0.525962653
     ],
     "max": [
-      1645.230987115,
-      196.657642865,
-      1464.797251818
+      229.189282707,
+      161.158676901,
+      160.159966107
     ],
     "size": [
-      3006.960686605,
-      685.600041155,
-      3006.811293896
+      452.407484379,
+      161.160043979,
+      159.634003454
     ],
     "center": [
-      141.750643813,
-      -146.142377712,
-      -38.60839513
+      2.985540518,
+      80.578654912,
+      80.34296438
     ],
     "cameraTarget": [
-      126.381537698,
-      85.536447228,
-      -76.553298106
+      0.439848798,
+      77.16893875,
+      94.555935782
     ],
-    "distanceFromOrigin": 207.22318345
+    "distanceFromOrigin": 113.828050168
   },
   "textures": {
-    "totalBytes": 379914,
+    "totalBytes": 1355292,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
     "maxHeight": 2048,
-    "transparentCount": 0,
+    "transparentCount": 1,
     "oversizedCount": 0,
     "duplicateCount": 0,
-    "estimatedGPUBytesRGBA8WithMipmaps": 87724612
+    "estimatedGPUBytesRGBA8WithMipmaps": 75034968
   },
   "materials": {
     "alphaModeCounts": {
-      "OPAQUE": 0,
-      "MASK": 49,
-      "BLEND": 12
+      "OPAQUE": 81,
+      "MASK": 0,
+      "BLEND": 13
     },
-    "blendedCount": 12,
-    "maskedCount": 49
+    "blendedCount": 13,
+    "maskedCount": 0
   },
   "extensions": {
     "used": [
-      "EXT_texture_webp",
-      "KHR_materials_pbrSpecularGlossiness"
+      "EXT_texture_webp"
     ],
     "required": [
       "EXT_texture_webp"
@@ -92,110 +91,105 @@
     "minimumInstanceCount": 2
   },
   "runtimeOptimization": {
-    "removedNodes": 57621,
-    "mergedMeshes": 46109,
-    "mergedPrimitives": 46109,
-    "repeatedGeometryGroups": 2076,
-    "repeatedGeometryInstances": 49150,
+    "removedNodes": 23052,
+    "mergedMeshes": 9860,
+    "mergedPrimitives": 18592,
+    "repeatedGeometryGroups": 479,
+    "repeatedGeometryInstances": 153641,
     "instancingUsed": false,
     "instanceBatches": 0,
     "instancesBatched": 0,
-    "estimatedDrawCallsBefore": 51153,
-    "estimatedDrawCallsAfter": 50983,
-    "estimatedDrawCallsWithoutInstancing": 50983,
+    "estimatedDrawCallsBefore": 1359081,
+    "estimatedDrawCallsAfter": 1359081,
+    "estimatedDrawCallsWithoutInstancing": 1359081,
     "estimatedDrawCallSavingsFromInstancing": 0,
-    "estimatedDrawCallsIfInstanced": 3909,
-    "potentialDrawCallSavingsFromInstancing": 47074,
+    "estimatedDrawCallsIfInstanced": 10303,
+    "potentialDrawCallSavingsFromInstancing": 1348778,
     "repeatedGeometryTopGroups": [
       {
-        "signature": "55faa2e8047a1afc",
-        "meshes": 1,
-        "instances": 379,
-        "sceneNodes": 379,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 378
-      },
-      {
-        "signature": "f1d0b2b516d46981",
-        "meshes": 1,
-        "instances": 240,
-        "sceneNodes": 240,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 239
-      },
-      {
-        "signature": "1d96c582e0a03440",
-        "meshes": 1,
-        "instances": 238,
-        "sceneNodes": 238,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 237
-      },
-      {
-        "signature": "e1496b8b9b674833",
-        "meshes": 1,
-        "instances": 209,
-        "sceneNodes": 209,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 208
-      },
-      {
-        "signature": "4c8e855d6fc00300",
-        "meshes": 1,
-        "instances": 170,
-        "sceneNodes": 170,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 169
-      },
-      {
-        "signature": "d856cbb1734ef69e",
-        "meshes": 1,
-        "instances": 169,
-        "sceneNodes": 169,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 168
-      },
-      {
-        "signature": "3622da33b5b0adff",
+        "signature": "6382bfaab62896e7",
         "meshes": 2,
-        "instances": 166,
-        "sceneNodes": 166,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 165
+        "instances": 59085,
+        "sceneNodes": 59085,
+        "primitivesPerInstance": 5,
+        "estimatedDrawCallSavings": 295420
       },
       {
-        "signature": "7a79d32f2fe11798",
+        "signature": "7e220c79be33bc79",
         "meshes": 2,
-        "instances": 166,
-        "sceneNodes": 166,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 165
+        "instances": 9090,
+        "sceneNodes": 9090,
+        "primitivesPerInstance": 16,
+        "estimatedDrawCallSavings": 145424
       },
       {
-        "signature": "a5a5cef7498c3030",
-        "meshes": 2,
-        "instances": 166,
-        "sceneNodes": 166,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 165
+        "signature": "7374abf83551eacb",
+        "meshes": 1,
+        "instances": 2485,
+        "sceneNodes": 2485,
+        "primitivesPerInstance": 30,
+        "estimatedDrawCallSavings": 74520
       },
       {
-        "signature": "c5ed5a68b1efdd67",
-        "meshes": 2,
-        "instances": 166,
-        "sceneNodes": 166,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 165
+        "signature": "5118ab0e475a2ffc",
+        "meshes": 1,
+        "instances": 2685,
+        "sceneNodes": 2685,
+        "primitivesPerInstance": 27,
+        "estimatedDrawCallSavings": 72468
+      },
+      {
+        "signature": "f40d3c0781bae0cd",
+        "meshes": 1,
+        "instances": 3720,
+        "sceneNodes": 3720,
+        "primitivesPerInstance": 15,
+        "estimatedDrawCallSavings": 55785
+      },
+      {
+        "signature": "572e3a54ead2f11d",
+        "meshes": 1,
+        "instances": 4545,
+        "sceneNodes": 4545,
+        "primitivesPerInstance": 12,
+        "estimatedDrawCallSavings": 54528
+      },
+      {
+        "signature": "4db37f0e70710946",
+        "meshes": 1,
+        "instances": 4545,
+        "sceneNodes": 4545,
+        "primitivesPerInstance": 10,
+        "estimatedDrawCallSavings": 45440
+      },
+      {
+        "signature": "e462f79bd2584fd4",
+        "meshes": 1,
+        "instances": 90,
+        "sceneNodes": 90,
+        "primitivesPerInstance": 472,
+        "estimatedDrawCallSavings": 42008
+      },
+      {
+        "signature": "af3de6bac6fa50e5",
+        "meshes": 1,
+        "instances": 2685,
+        "sceneNodes": 2685,
+        "primitivesPerInstance": 15,
+        "estimatedDrawCallSavings": 40260
+      },
+      {
+        "signature": "182eb16b94a82309",
+        "meshes": 1,
+        "instances": 171,
+        "sceneNodes": 171,
+        "primitivesPerInstance": 236,
+        "estimatedDrawCallSavings": 40120
       }
     ]
   },
   "validation": {
     "passed": true,
-    "warnings": [
-      {
-        "code": "SOURCE_TEXTURE_RESIZE_REQUIRED",
-        "message": "3 texture(s) exceed 2048px."
-      }
-    ]
+    "warnings": []
   }
 }
