@@ -7,17 +7,17 @@
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 50638828,
-    "sha256": "e7913a8156942005b416d83b41ec820c1f152a22eef05ce27c18d4966d02b19d"
+    "sizeBytes": 51897316,
+    "sha256": "b7c4f83a0c63b93296cb8a901622f3355ffaa8394d9b69fcc05794a82dd7c905"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 111103,
-    "meshes": 5145,
-    "meshInstances": 51153,
-    "primitives": 5145,
-    "drawCalls": 51153,
+    "nodes": 110933,
+    "meshes": 5044,
+    "meshInstances": 50983,
+    "primitives": 5044,
+    "drawCalls": 50983,
     "storedTriangles": 694825,
     "renderedTriangles": 1749704,
     "materials": 61,
@@ -44,6 +44,11 @@
       141.750643813,
       -146.142377712,
       -38.60839513
+    ],
+    "cameraTarget": [
+      126.381537698,
+      85.536447228,
+      -76.553298106
     ],
     "distanceFromOrigin": 207.22318345
   },
@@ -82,7 +87,107 @@
     "maxTextureSize": 2048,
     "colorTextureQuality": 82,
     "webpEffort": 100,
-    "preserveRenderedTriangles": true
+    "preserveRenderedTriangles": true,
+    "runtimeInstancing": false,
+    "minimumInstanceCount": 2
+  },
+  "runtimeOptimization": {
+    "removedNodes": 57621,
+    "mergedMeshes": 46109,
+    "mergedPrimitives": 46109,
+    "repeatedGeometryGroups": 2076,
+    "repeatedGeometryInstances": 49150,
+    "instancingUsed": false,
+    "instanceBatches": 0,
+    "instancesBatched": 0,
+    "estimatedDrawCallsBefore": 51153,
+    "estimatedDrawCallsAfter": 50983,
+    "estimatedDrawCallsWithoutInstancing": 50983,
+    "estimatedDrawCallSavingsFromInstancing": 0,
+    "estimatedDrawCallsIfInstanced": 3909,
+    "potentialDrawCallSavingsFromInstancing": 47074,
+    "repeatedGeometryTopGroups": [
+      {
+        "signature": "55faa2e8047a1afc",
+        "meshes": 1,
+        "instances": 379,
+        "sceneNodes": 379,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 378
+      },
+      {
+        "signature": "f1d0b2b516d46981",
+        "meshes": 1,
+        "instances": 240,
+        "sceneNodes": 240,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 239
+      },
+      {
+        "signature": "1d96c582e0a03440",
+        "meshes": 1,
+        "instances": 238,
+        "sceneNodes": 238,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 237
+      },
+      {
+        "signature": "e1496b8b9b674833",
+        "meshes": 1,
+        "instances": 209,
+        "sceneNodes": 209,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 208
+      },
+      {
+        "signature": "4c8e855d6fc00300",
+        "meshes": 1,
+        "instances": 170,
+        "sceneNodes": 170,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 169
+      },
+      {
+        "signature": "d856cbb1734ef69e",
+        "meshes": 1,
+        "instances": 169,
+        "sceneNodes": 169,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 168
+      },
+      {
+        "signature": "3622da33b5b0adff",
+        "meshes": 2,
+        "instances": 166,
+        "sceneNodes": 166,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 165
+      },
+      {
+        "signature": "7a79d32f2fe11798",
+        "meshes": 2,
+        "instances": 166,
+        "sceneNodes": 166,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 165
+      },
+      {
+        "signature": "a5a5cef7498c3030",
+        "meshes": 2,
+        "instances": 166,
+        "sceneNodes": 166,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 165
+      },
+      {
+        "signature": "c5ed5a68b1efdd67",
+        "meshes": 2,
+        "instances": 166,
+        "sceneNodes": 166,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 165
+      }
+    ]
   },
   "validation": {
     "passed": true,
