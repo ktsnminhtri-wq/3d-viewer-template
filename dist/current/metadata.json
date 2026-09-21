@@ -1,76 +1,76 @@
 {
   "schemaVersion": 1,
   "source": {
-    "name": "tower.glb",
-    "sizeBytes": 70797932,
-    "sha256": "c41d9c63e8b14ba4cfdf589cc16fbb2648461486642cc4761ad4706ef01ad709"
+    "name": "5towers.glb",
+    "sizeBytes": 60960440,
+    "sha256": "ec3a9cd7f66510c10e34997e299a4a8e572cf6c2fb4a3f0fbe842dad09e77433"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 23584820,
-    "sha256": "d0ae925f0d57a128253d687c13d9848eaf7d8ea937414fc2c5399fc655af0c2e"
+    "sizeBytes": 48848488,
+    "sha256": "ec927b22cd6961a6cd443edc9a2dbd3e59fbaa02338b80ce2aff6714899a56df"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 5366,
-    "meshes": 371,
-    "meshInstances": 3353,
-    "primitives": 539,
-    "drawCalls": 4058,
-    "storedTriangles": 209945,
-    "renderedTriangles": 406868,
-    "materials": 117,
-    "textures": 29,
+    "nodes": 153660,
+    "meshes": 596,
+    "meshInstances": 153660,
+    "primitives": 11261,
+    "drawCalls": 1359081,
+    "storedTriangles": 32636,
+    "renderedTriangles": 3306337,
+    "materials": 94,
+    "textures": 8,
     "animations": 0
   },
   "bounds": {
     "min": [
-      135.050843582,
-      -44.100005326,
-      -210.544394898
+      -223.218201671,
+      -0.001367078,
+      0.525962653
     ],
     "max": [
-      246.539727209,
-      65.545002678,
-      -93.673338807
+      229.189282707,
+      161.158676901,
+      160.159966107
     ],
     "size": [
-      111.488883627,
-      109.645008004,
-      116.871056091
+      452.407484379,
+      161.160043979,
+      159.634003454
     ],
     "center": [
-      190.795285396,
-      10.722498676,
-      -152.108866853
+      2.985540518,
+      80.578654912,
+      80.34296438
     ],
     "cameraTarget": [
-      200.100684549,
-      17.222131674,
-      -152.697579937
+      0.439848798,
+      77.16893875,
+      94.555935782
     ],
-    "distanceFromOrigin": 244.243567535
+    "distanceFromOrigin": 113.828050168
   },
   "textures": {
-    "totalBytes": 4682726,
+    "totalBytes": 1355292,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
-    "maxHeight": 2000,
-    "transparentCount": 0,
+    "maxHeight": 2048,
+    "transparentCount": 1,
     "oversizedCount": 0,
     "duplicateCount": 0,
-    "estimatedGPUBytesRGBA8WithMipmaps": 142221652
+    "estimatedGPUBytesRGBA8WithMipmaps": 75034968
   },
   "materials": {
     "alphaModeCounts": {
-      "OPAQUE": 105,
+      "OPAQUE": 81,
       "MASK": 0,
-      "BLEND": 12
+      "BLEND": 13
     },
-    "blendedCount": 12,
+    "blendedCount": 13,
     "maskedCount": 0
   },
   "extensions": {
@@ -91,110 +91,105 @@
     "minimumInstanceCount": 2
   },
   "runtimeOptimization": {
-    "removedNodes": 4807,
-    "mergedMeshes": 1059,
-    "mergedPrimitives": 73900,
-    "repeatedGeometryGroups": 195,
-    "repeatedGeometryInstances": 3182,
+    "removedNodes": 23052,
+    "mergedMeshes": 9860,
+    "mergedPrimitives": 18592,
+    "repeatedGeometryGroups": 479,
+    "repeatedGeometryInstances": 153641,
     "instancingUsed": false,
     "instanceBatches": 0,
     "instancesBatched": 0,
-    "estimatedDrawCallsBefore": 179023,
-    "estimatedDrawCallsAfter": 4058,
-    "estimatedDrawCallsWithoutInstancing": 4058,
+    "estimatedDrawCallsBefore": 1359081,
+    "estimatedDrawCallsAfter": 1359081,
+    "estimatedDrawCallsWithoutInstancing": 1359081,
     "estimatedDrawCallSavingsFromInstancing": 0,
-    "estimatedDrawCallsIfInstanced": 533,
-    "potentialDrawCallSavingsFromInstancing": 3525,
+    "estimatedDrawCallsIfInstanced": 10303,
+    "potentialDrawCallSavingsFromInstancing": 1348778,
     "repeatedGeometryTopGroups": [
       {
-        "signature": "0f5454a88d208f27",
-        "meshes": 1,
-        "instances": 138,
-        "sceneNodes": 138,
-        "primitivesPerInstance": 3,
-        "estimatedDrawCallSavings": 411
-      },
-      {
-        "signature": "6bf2a9e9f41886a1",
-        "meshes": 1,
-        "instances": 234,
-        "sceneNodes": 234,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 233
-      },
-      {
-        "signature": "8c2e7d17772ccc13",
-        "meshes": 1,
-        "instances": 234,
-        "sceneNodes": 234,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 233
-      },
-      {
-        "signature": "4928f8d94e954551",
-        "meshes": 1,
-        "instances": 176,
-        "sceneNodes": 176,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 175
-      },
-      {
-        "signature": "56952f0940b6f995",
-        "meshes": 1,
-        "instances": 176,
-        "sceneNodes": 176,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 175
-      },
-      {
-        "signature": "9e1e1446f5c6843c",
+        "signature": "6382bfaab62896e7",
         "meshes": 2,
-        "instances": 175,
-        "sceneNodes": 175,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 174
+        "instances": 59085,
+        "sceneNodes": 59085,
+        "primitivesPerInstance": 5,
+        "estimatedDrawCallSavings": 295420
       },
       {
-        "signature": "f466fafd53fbe7ba",
-        "meshes": 1,
-        "instances": 87,
-        "sceneNodes": 87,
-        "primitivesPerInstance": 2,
-        "estimatedDrawCallSavings": 172
-      },
-      {
-        "signature": "fc89e50860d0d5ac",
-        "meshes": 1,
-        "instances": 153,
-        "sceneNodes": 153,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 152
-      },
-      {
-        "signature": "a3bd8a2fb282c1cf",
-        "meshes": 1,
-        "instances": 117,
-        "sceneNodes": 117,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 116
-      },
-      {
-        "signature": "efdd19070cb5baf3",
+        "signature": "7e220c79be33bc79",
         "meshes": 2,
-        "instances": 114,
-        "sceneNodes": 114,
-        "primitivesPerInstance": 1,
-        "estimatedDrawCallSavings": 113
+        "instances": 9090,
+        "sceneNodes": 9090,
+        "primitivesPerInstance": 16,
+        "estimatedDrawCallSavings": 145424
+      },
+      {
+        "signature": "7374abf83551eacb",
+        "meshes": 1,
+        "instances": 2485,
+        "sceneNodes": 2485,
+        "primitivesPerInstance": 30,
+        "estimatedDrawCallSavings": 74520
+      },
+      {
+        "signature": "5118ab0e475a2ffc",
+        "meshes": 1,
+        "instances": 2685,
+        "sceneNodes": 2685,
+        "primitivesPerInstance": 27,
+        "estimatedDrawCallSavings": 72468
+      },
+      {
+        "signature": "f40d3c0781bae0cd",
+        "meshes": 1,
+        "instances": 3720,
+        "sceneNodes": 3720,
+        "primitivesPerInstance": 15,
+        "estimatedDrawCallSavings": 55785
+      },
+      {
+        "signature": "572e3a54ead2f11d",
+        "meshes": 1,
+        "instances": 4545,
+        "sceneNodes": 4545,
+        "primitivesPerInstance": 12,
+        "estimatedDrawCallSavings": 54528
+      },
+      {
+        "signature": "4db37f0e70710946",
+        "meshes": 1,
+        "instances": 4545,
+        "sceneNodes": 4545,
+        "primitivesPerInstance": 10,
+        "estimatedDrawCallSavings": 45440
+      },
+      {
+        "signature": "e462f79bd2584fd4",
+        "meshes": 1,
+        "instances": 90,
+        "sceneNodes": 90,
+        "primitivesPerInstance": 472,
+        "estimatedDrawCallSavings": 42008
+      },
+      {
+        "signature": "af3de6bac6fa50e5",
+        "meshes": 1,
+        "instances": 2685,
+        "sceneNodes": 2685,
+        "primitivesPerInstance": 15,
+        "estimatedDrawCallSavings": 40260
+      },
+      {
+        "signature": "182eb16b94a82309",
+        "meshes": 1,
+        "instances": 171,
+        "sceneNodes": 171,
+        "primitivesPerInstance": 236,
+        "estimatedDrawCallSavings": 40120
       }
     ]
   },
   "validation": {
     "passed": true,
-    "warnings": [
-      {
-        "code": "SOURCE_TEXTURE_RESIZE_REQUIRED",
-        "message": "1 texture(s) exceed 2048px."
-      }
-    ]
+    "warnings": []
   }
 }
