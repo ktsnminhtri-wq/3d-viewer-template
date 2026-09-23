@@ -2,132 +2,133 @@
   "schemaVersion": 2,
   "complexityClass": "HIGHLY_FRAGMENTED",
   "complexityMetrics": {
-    "primitiveCount": 29853,
-    "nodeCount": 176712,
-    "meshCount": 10456,
-    "materialCount": 13148,
-    "accessorCount": 56402,
-    "averageTrianglesPerPrimitive": 1.2350182561216627,
-    "repeatedGeometryRatio": 0.9998763503839646
+    "primitiveCount": 51153,
+    "nodeCount": 168554,
+    "meshCount": 51153,
+    "materialCount": 65,
+    "accessorCount": 18403,
+    "averageTrianglesPerPrimitive": 34.20530565167243,
+    "repeatedGeometryRatio": 0.9622896017828866
   },
   "optimizationPath": "consolidated-fast",
   "preprocessingTimingsMs": {
-    "sourceHash": 121,
+    "sourceHash": 140,
     "workspacePreparation": 2,
-    "sourceAnalysis": 17665,
-    "sourceValidation": 7777,
+    "sourceAnalysis": 9881,
+    "sourceValidation": 4669,
     "sourcePreflight": 0,
-    "workspaceCopy": 65,
-    "optimizationTotal": 29589,
-    "optimize.read": 5060,
-    "optimize.collectBefore": 528,
-    "optimize.dedupMaterialsInitial": 2303,
-    "optimize.primitiveConsolidation": 405,
-    "optimize.pruneStructure": 759,
-    "optimize.dedupAccessors": 414,
-    "optimize.dedupMeshes": 518,
-    "optimize.flatten": 2467,
-    "optimize.instance": 2371,
-    "optimize.textures": 14430,
-    "optimize.dedupTexturesMaterialsFinal": 26,
-    "optimize.pruneFinal": 128,
-    "optimize.normalizeRotations": 31,
-    "optimize.collectAfter": 7,
-    "optimize.write": 114,
-    "candidateAnalysis": 5830,
-    "finalValidation": 574,
-    "sourceHashVerification": 188,
-    "outputHash": 19,
-    "totalBeforeMetadata": 61835,
+    "workspaceCopy": 415,
+    "optimizationTotal": 17168,
+    "optimize.read": 3925,
+    "optimize.collectBefore": 237,
+    "optimize.dedupMaterialsInitial": 65,
+    "optimize.primitiveConsolidation": 236,
+    "optimize.pruneStructure": 818,
+    "optimize.dedupAccessors": 2567,
+    "optimize.dedupMeshes": 770,
+    "optimize.flatten": 1723,
+    "optimize.instance": 906,
+    "optimize.textures": 3738,
+    "optimize.dedupTexturesMaterialsFinal": 41,
+    "optimize.pruneFinal": 845,
+    "optimize.normalizeRotations": 22,
+    "optimize.collectAfter": 37,
+    "optimize.write": 1208,
+    "candidateAnalysis": 3995,
+    "finalValidation": 1422,
+    "sourceHashVerification": 210,
+    "outputHash": 88,
+    "totalBeforeMetadata": 37992,
     "metadataCreation": 1
   },
-  "primitivesBefore": 29853,
-  "primitivesAfter": 792,
-  "geometriesBefore": 29853,
-  "geometriesAfter": 792,
-  "estimatedDrawCallsBefore": 1359081,
-  "estimatedDrawCallsAfter": 792,
-  "mergedPrimitiveCount": 12178,
-  "consolidationGroupCount": 896,
-  "trianglesBefore": 3306337,
-  "trianglesAfter": 3306337,
+  "primitivesBefore": 51153,
+  "primitivesAfter": 4605,
+  "geometriesBefore": 51153,
+  "geometriesAfter": 4605,
+  "estimatedDrawCallsBefore": 51153,
+  "estimatedDrawCallsAfter": 4605,
+  "mergedPrimitiveCount": 0,
+  "consolidationGroupCount": 0,
+  "trianglesBefore": 1749704,
+  "trianglesAfter": 1749704,
   "source": {
-    "name": "5towers.glb",
-    "sizeBytes": 60960440,
-    "sha256": "ec3a9cd7f66510c10e34997e299a4a8e572cf6c2fb4a3f0fbe842dad09e77433"
+    "name": "260914_HH&CCTP-OPTION MAI XEO.glb",
+    "sizeBytes": 90083920,
+    "sha256": "4b44de937225b3ec40cbc8520f67993c735066bff02597ca5f9d34e786b7b130"
   },
   "output": {
     "name": "model.glb",
-    "sizeBytes": 10181408,
-    "sha256": "559245f943793a87dae051675831f072d27940bbc6ee875c7aff5cda547756a0"
+    "sizeBytes": 44195428,
+    "sha256": "bc1f53f3cbb8bbe61eb10226bce3537d1206de746d76e417a4a1fd2b3a9bd13b"
   },
   "gltfVersion": "2.0",
   "counts": {
     "scenes": 1,
-    "nodes": 564,
-    "meshes": 564,
-    "meshInstances": 153660,
-    "primitives": 792,
-    "drawCalls": 792,
-    "storedTriangles": 31864,
-    "renderedTriangles": 3306337,
-    "materials": 94,
-    "textures": 8,
+    "nodes": 4605,
+    "meshes": 4605,
+    "meshInstances": 51153,
+    "primitives": 4605,
+    "drawCalls": 4605,
+    "storedTriangles": 687909,
+    "renderedTriangles": 1749704,
+    "materials": 61,
+    "textures": 31,
     "animations": 0
   },
   "bounds": {
     "min": [
-      -223.218213347,
-      -0.001367078,
-      0.525962653
+      -1361.729689933,
+      -488.942398289,
+      -1542.014019199
     ],
     "max": [
-      229.189282707,
-      161.158676417,
-      160.159964868
+      1645.231006034,
+      196.657641661,
+      1464.797284059
     ],
     "size": [
-      452.407496055,
-      161.160043495,
-      159.634002215
+      3006.960695967,
+      685.600039951,
+      3006.811303258
     ],
     "center": [
-      2.98553468,
-      80.578654669,
-      80.34296376
+      141.750658051,
+      -146.142378314,
+      -38.60836757
     ],
     "cameraTarget": [
-      0.439848602,
-      77.168938616,
-      94.555935684
+      126.650624525,
+      86.380218277,
+      -76.077142331
     ],
-    "distanceFromOrigin": 113.828049405
+    "distanceFromOrigin": 207.223188479
   },
   "textures": {
-    "totalBytes": 1355292,
+    "totalBytes": 379914,
     "formats": [
       "image/webp"
     ],
     "maxWidth": 2048,
     "maxHeight": 2048,
-    "transparentCount": 1,
+    "transparentCount": 0,
     "oversizedCount": 0,
     "duplicateCount": 0,
-    "estimatedGPUBytesRGBA8WithMipmaps": 75034968
+    "estimatedGPUBytesRGBA8WithMipmaps": 87724612
   },
   "materials": {
     "alphaModeCounts": {
-      "OPAQUE": 81,
-      "MASK": 0,
-      "BLEND": 13
+      "OPAQUE": 0,
+      "MASK": 49,
+      "BLEND": 12
     },
-    "blendedCount": 13,
-    "maskedCount": 0
+    "blendedCount": 12,
+    "maskedCount": 49
   },
   "extensions": {
     "used": [
       "EXT_mesh_gpu_instancing",
-      "EXT_texture_webp"
+      "EXT_texture_webp",
+      "KHR_materials_pbrSpecularGlossiness"
     ],
     "required": [
       "EXT_mesh_gpu_instancing",
@@ -144,114 +145,119 @@
     "minimumInstanceCount": 2
   },
   "runtimeOptimization": {
-    "removedNodes": 176148,
-    "mergedMeshes": 9892,
-    "mergedPrimitives": 29061,
-    "repeatedGeometryGroups": 479,
-    "repeatedGeometryInstances": 153641,
+    "removedNodes": 163949,
+    "mergedMeshes": 46548,
+    "mergedPrimitives": 46548,
+    "repeatedGeometryGroups": 2081,
+    "repeatedGeometryInstances": 49224,
     "instancingUsed": true,
-    "instanceBatches": 545,
-    "instancesBatched": 153641,
-    "estimatedDrawCallsBefore": 1359081,
-    "estimatedDrawCallsAfter": 792,
-    "estimatedDrawCallsWithoutInstancing": 214850,
-    "estimatedDrawCallSavingsFromInstancing": 214058,
-    "estimatedDrawCallsIfInstanced": 722,
-    "potentialDrawCallSavingsFromInstancing": 70,
+    "instanceBatches": 2201,
+    "instancesBatched": 48749,
+    "estimatedDrawCallsBefore": 51153,
+    "estimatedDrawCallsAfter": 4605,
+    "estimatedDrawCallsWithoutInstancing": 51153,
+    "estimatedDrawCallSavingsFromInstancing": 46548,
+    "estimatedDrawCallsIfInstanced": 4010,
+    "potentialDrawCallSavingsFromInstancing": 595,
     "repeatedGeometryTopGroups": [
       {
-        "signature": "cd97ec9b36a39c70",
+        "signature": "07a30f253c9ce973",
         "meshes": 2,
-        "instances": 9090,
-        "sceneNodes": 2,
-        "primitivesPerInstance": 3,
-        "estimatedDrawCallSavings": 3
-      },
-      {
-        "signature": "692d0bd3da61170a",
-        "meshes": 2,
-        "instances": 5,
-        "sceneNodes": 2,
-        "primitivesPerInstance": 3,
-        "estimatedDrawCallSavings": 3
-      },
-      {
-        "signature": "46235aeaa76b3066",
-        "meshes": 2,
-        "instances": 59085,
+        "instances": 166,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "977b696971f801da",
+        "signature": "48ed36865b9a56e3",
         "meshes": 2,
-        "instances": 410,
+        "instances": 166,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "2b966bd032d1f364",
+        "signature": "8cc9af6748759090",
         "meshes": 2,
-        "instances": 280,
+        "instances": 166,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "660721e8d9b537f0",
+        "signature": "f32db34b6222fa93",
         "meshes": 2,
-        "instances": 235,
+        "instances": 166,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "ab80e9dfa0083f36",
+        "signature": "409b8a2a61fae066",
         "meshes": 2,
-        "instances": 210,
+        "instances": 164,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "e3acceca0581cbb1",
+        "signature": "1bdf3f85e4eeda2a",
         "meshes": 2,
-        "instances": 210,
+        "instances": 161,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "f887e69e9f849261",
+        "signature": "c200b996343c2681",
         "meshes": 2,
-        "instances": 210,
+        "instances": 161,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       },
       {
-        "signature": "0b6ee4b8b077ebf7",
+        "signature": "492a629501efbffa",
         "meshes": 2,
-        "instances": 205,
+        "instances": 148,
+        "sceneNodes": 2,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 1
+      },
+      {
+        "signature": "6cd00127730cd5e3",
+        "meshes": 2,
+        "instances": 129,
+        "sceneNodes": 2,
+        "primitivesPerInstance": 1,
+        "estimatedDrawCallSavings": 1
+      },
+      {
+        "signature": "52288c4c10251bd8",
+        "meshes": 2,
+        "instances": 125,
         "sceneNodes": 2,
         "primitivesPerInstance": 1,
         "estimatedDrawCallSavings": 1
       }
     ],
     "consolidation": {
-      "inputPrimitives": 29853,
-      "outputPrimitives": 17675,
-      "consolidationGroupCount": 896,
-      "joinedPrimitiveCount": 13074,
-      "mergedPrimitiveCount": 12178,
-      "joinedGroups": 896,
-      "joinedPrimitives": 13074
+      "inputPrimitives": 51153,
+      "outputPrimitives": 51153,
+      "consolidationGroupCount": 0,
+      "joinedPrimitiveCount": 0,
+      "mergedPrimitiveCount": 0,
+      "joinedGroups": 0,
+      "joinedPrimitives": 0
     }
   },
   "validation": {
     "passed": true,
-    "warnings": []
+    "warnings": [
+      {
+        "code": "SOURCE_TEXTURE_RESIZE_REQUIRED",
+        "message": "3 texture(s) exceed 2048px."
+      }
+    ]
   }
 }
