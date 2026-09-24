@@ -23,6 +23,66 @@ function functionalMaterialKey(material) {
   return JSON.stringify(stableValue(material));
 }
 
+function accessorContentKey(accessor, definition = {}) {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify({
+    componentType: definition.componentType ?? null,
+    normalized: definition.normalized ?? false,
+    type: definition.type ?? null,
+    count: definition.count ?? 0,
+  }));
+  const array = accessor?.getArray?.();
+  if (array) hash.update(Buffer.from(array.buffer, array.byteOffset, array.byteLength));
+  return hash.digest("hex");
+}
+
+function primitiveContentKey(primitive, accessorKeys, materialKeys, includeMaterial) {
+  const attributes = Object.entries(primitive.attributes ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([semantic, accessorIndex]) => [semantic, accessorKeys[accessorIndex] ?? null]);
+  const targets = (primitive.targets ?? []).map((target) => Object.entries(target)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([semantic, accessorIndex]) => [semantic, accessorKeys[accessorIndex] ?? null]));
+  return {
+    mode: primitive.mode ?? 4,
+    indices: primitive.indices === undefined ? null : accessorKeys[primitive.indices] ?? null,
+    attributes,
+    targets,
+    material: includeMaterial && primitive.material !== undefined
+      ? materialKeys[primitive.material] ?? null
+      : null,
+  };
+}
+
+function meshContentKey(mesh, accessorKeys, materialKeys, includeMaterial) {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify((mesh.primitives ?? []).map(
+    (primitive) => primitiveContentKey(primitive, accessorKeys, materialKeys, includeMaterial),
+  )));
+  return hash.digest("hex");
+}
+
+function summarizeRepeatedGroups(groups, { limit = 10 } = {}) {
+  return [...groups.values()]
+    .filter((group) => group.instances > 1)
+    .map((group) => ({
+      ...group,
+      estimatedDrawCallSavings: Math.max(0, group.sceneNodes - 1) * group.primitives,
+    }))
+    .sort((a, b) => b.estimatedDrawCallSavings - a.estimatedDrawCallSavings
+      || b.instances - a.instances
+      || a.signature.localeCompare(b.signature))
+    .slice(0, limit)
+    .map((group) => ({
+      signature: group.signature.slice(0, 16),
+      meshes: group.meshes.size,
+      instances: group.instances,
+      sceneNodes: group.sceneNodes,
+      primitivesPerInstance: group.primitives,
+      estimatedDrawCallSavings: group.estimatedDrawCallSavings,
+    }));
+}
+
 function materialCoreValue(material = {}) {
   const pbr = material.pbrMetallicRoughness ?? {};
   return {
@@ -66,6 +126,26 @@ function collectTextureReferences(value, target, parentKey = "") {
   if (!value || typeof value !== "object") return;
   if (parentKey.endsWith("Texture") && Number.isInteger(value.index)) target.add(value.index);
   for (const [key, child] of Object.entries(value)) collectTextureReferences(child, target, key);
+}
+
+function textureUsageSignature(material = {}) {
+  const usages = [];
+  function visit(value, path = "") {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = path ? `${path}.${key}` : key;
+      if (key.endsWith("Texture") && child && Number.isInteger(child.index)) {
+        usages.push({
+          path: childPath,
+          texCoord: child.texCoord ?? 0,
+          transform: stableValue(child.extensions?.KHR_texture_transform ?? null),
+        });
+      }
+      visit(child, childPath);
+    }
+  }
+  visit(material);
+  return JSON.stringify(usages.sort((a, b) => a.path.localeCompare(b.path)));
 }
 
 function textureSource(texture) {
@@ -165,6 +245,50 @@ function aggregateBounds(root) {
   };
 }
 
+function triangleWeightedCameraTarget(root) {
+  const weighted = [0, 0, 0];
+  let totalWeight = 0;
+  for (const node of root.listNodes()) {
+    const mesh = node.getMesh();
+    if (!mesh) continue;
+    const localMin = [Infinity, Infinity, Infinity];
+    const localMax = [-Infinity, -Infinity, -Infinity];
+    let foundPosition = false;
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute("POSITION");
+      if (!position || position.getElementSize() < 3) continue;
+      const primitiveMin = position.getMinNormalized([]);
+      const primitiveMax = position.getMaxNormalized([]);
+      if (!finiteVector(primitiveMin) || !finiteVector(primitiveMax)) continue;
+      foundPosition = true;
+      for (let axis = 0; axis < 3; axis += 1) {
+        localMin[axis] = Math.min(localMin[axis], primitiveMin[axis]);
+        localMax[axis] = Math.max(localMax[axis], primitiveMax[axis]);
+      }
+    }
+    if (!foundPosition) continue;
+    const localCenter = localMin.map((value, axis) => (value + localMax[axis]) / 2);
+    const matrix = node.getWorldMatrix();
+    const worldCenter = [
+      matrix[0] * localCenter[0] + matrix[4] * localCenter[1] + matrix[8] * localCenter[2] + matrix[12],
+      matrix[1] * localCenter[0] + matrix[5] * localCenter[1] + matrix[9] * localCenter[2] + matrix[13],
+      matrix[2] * localCenter[0] + matrix[6] * localCenter[1] + matrix[10] * localCenter[2] + matrix[14],
+    ];
+    if (!worldCenter.every(Number.isFinite)) continue;
+    const weight = Math.max(1, mesh.listPrimitives().reduce((sum, primitive) => {
+      const accessor = primitive.getIndices() ?? primitive.getAttribute("POSITION");
+      const count = accessor?.getCount() ?? 0;
+      const mode = primitive.getMode();
+      if (mode === 4) return sum + Math.floor(count / 3);
+      if (mode === 5 || mode === 6) return sum + Math.max(0, count - 2);
+      return sum;
+    }, 0));
+    for (let axis = 0; axis < 3; axis += 1) weighted[axis] += worldCenter[axis] * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted.map((value) => normalizedNumber(value / totalWeight)) : null;
+}
+
 function countInvalidNumericValues(root) {
   let count = 0;
   for (const accessor of root.listAccessors()) {
@@ -194,6 +318,24 @@ export async function analyzeGLB(filePath) {
   const bufferViews = gltf.bufferViews ?? [];
   const textures = gltf.textures ?? [];
   const images = gltf.images ?? [];
+  const decodedAccessors = root.listAccessors();
+  const accessorKeys = accessors.map(
+    (definition, index) => accessorContentKey(decodedAccessors[index], definition),
+  );
+  const materialKeys = materials.map(functionalMaterialKey);
+  const meshGeometryKeys = meshes.map(
+    (mesh) => meshContentKey(mesh, accessorKeys, materialKeys, false),
+  );
+  const meshGeometryMaterialKeys = meshes.map(
+    (mesh) => meshContentKey(mesh, accessorKeys, materialKeys, true),
+  );
+  const meshMaterialKeys = meshes.map((mesh) => createHash("sha256")
+    .update(JSON.stringify((mesh.primitives ?? []).map(
+      (primitive) => primitive.material === undefined
+        ? null
+        : materialKeys[primitive.material] ?? null,
+    )))
+    .digest("hex"));
 
   const reachableNodes = new Set();
   const visitNode = (index) => {
@@ -207,13 +349,27 @@ export async function analyzeGLB(filePath) {
 
   const usedMeshes = new Set();
   const instanceAccessorIndices = new Set();
+  const meshSceneNodeCounts = new Map();
+  const meshSceneInstanceCounts = new Map();
   let meshInstances = 0;
+  let instancedBatchCount = 0;
+  let instancedInstanceCount = 0;
   for (const nodeIndex of reachableNodes) {
     const node = nodes[nodeIndex];
     const meshIndex = node?.mesh;
     if (meshIndex !== undefined) {
       usedMeshes.add(meshIndex);
-      meshInstances += nodeInstanceCount(node, accessors);
+      const instanceCount = nodeInstanceCount(node, accessors);
+      meshInstances += instanceCount;
+      meshSceneNodeCounts.set(meshIndex, (meshSceneNodeCounts.get(meshIndex) ?? 0) + 1);
+      meshSceneInstanceCounts.set(
+        meshIndex,
+        (meshSceneInstanceCounts.get(meshIndex) ?? 0) + instanceCount,
+      );
+      if (node.extensions?.EXT_mesh_gpu_instancing) {
+        instancedBatchCount += 1;
+        instancedInstanceCount += instanceCount;
+      }
       for (const accessorIndex of Object.values(
         node.extensions?.EXT_mesh_gpu_instancing?.attributes ?? {},
       )) instanceAccessorIndices.add(accessorIndex);
@@ -257,18 +413,60 @@ export async function analyzeGLB(filePath) {
 
   let sceneTriangles = 0;
   let sceneDrawCalls = 0;
+  let sceneDrawCallsWithoutInstancing = 0;
+  const sceneAttributeCounts = {};
   for (const nodeIndex of reachableNodes) {
     const node = nodes[nodeIndex];
     const meshIndex = node?.mesh;
     if (meshIndex === undefined) continue;
-    sceneTriangles += (meshTriangleCounts.get(meshIndex) ?? 0) * nodeInstanceCount(node, accessors);
+    const instanceCount = nodeInstanceCount(node, accessors);
+    sceneTriangles += (meshTriangleCounts.get(meshIndex) ?? 0) * instanceCount;
     for (const primitive of meshes[meshIndex]?.primitives ?? []) {
       const positionIndex = primitive.attributes?.POSITION;
       if (positionIndex !== undefined && (accessors[positionIndex]?.count ?? 0) > 0) {
         sceneDrawCalls += 1;
+        sceneDrawCallsWithoutInstancing += nodeInstanceCount(node, accessors);
+      }
+      for (const [semantic, accessorIndex] of Object.entries(primitive.attributes ?? {})) {
+        sceneAttributeCounts[semantic] = (sceneAttributeCounts[semantic] ?? 0)
+          + (accessors[accessorIndex]?.count ?? 0) * instanceCount;
       }
     }
   }
+
+  const repeatedGeometryGroups = new Map();
+  const repeatedGeometryMaterialGroups = new Map();
+  const repeatedMaterialCombinationGroups = new Map();
+  for (const meshIndex of usedMeshes) {
+    const mesh = meshes[meshIndex];
+    const primitives = mesh?.primitives?.length ?? 0;
+    const sceneNodes = meshSceneNodeCounts.get(meshIndex) ?? 0;
+    const instances = meshSceneInstanceCounts.get(meshIndex) ?? 0;
+    for (const [groups, signature] of [
+      [repeatedGeometryGroups, meshGeometryKeys[meshIndex]],
+      [repeatedGeometryMaterialGroups, meshGeometryMaterialKeys[meshIndex]],
+      [repeatedMaterialCombinationGroups, meshMaterialKeys[meshIndex]],
+    ]) {
+      if (!signature) continue;
+      const group = groups.get(signature) ?? {
+        signature,
+        meshes: new Set(),
+        instances: 0,
+        sceneNodes: 0,
+        primitives,
+      };
+      group.meshes.add(meshIndex);
+      group.instances += instances;
+      group.sceneNodes += sceneNodes;
+      groups.set(signature, group);
+    }
+  }
+  const instancingCandidates = [...repeatedGeometryMaterialGroups.values()]
+    .filter((group) => group.sceneNodes > 1);
+  const estimatedInstancingSavings = instancingCandidates.reduce(
+    (sum, group) => sum + Math.max(0, group.sceneNodes - 1) * group.primitives,
+    0,
+  );
 
   let renderablePrimitives = 0;
   for (const meshIndex of usedMeshes) {
@@ -376,6 +574,9 @@ export async function analyzeGLB(filePath) {
   const materialCoreSignatures = [...new Set(
     [...usedMaterials].map((materialIndex) => JSON.stringify(materialCoreValue(materials[materialIndex]))),
   )].sort();
+  const textureUsageSignatures = [...new Set(
+    [...usedMaterials].map((materialIndex) => textureUsageSignature(materials[materialIndex])),
+  )].sort();
   const textureBytes = imageRows.reduce((sum, image) => sum + image.bytes, 0);
   const estimatedTextureGPUBytes = imageRows.reduce((sum, image) => {
     if (!image.width || !image.height) return sum;
@@ -403,6 +604,7 @@ export async function analyzeGLB(filePath) {
     await document.transform(uninstance());
   }
   const bounds = aggregateBounds(root);
+  const cameraTarget = triangleWeightedCameraTarget(root) ?? bounds.center;
   const externalResourceURIs = [
     ...(gltf.buffers ?? []).map((buffer) => buffer.uri),
     ...images.map((image) => image.uri),
@@ -418,13 +620,29 @@ export async function analyzeGLB(filePath) {
     nodes: nodes.length,
     meshes: meshes.length,
     meshInstances,
+    instancedBatchCount,
+    instancedInstanceCount,
     primitives: primitiveCount,
     renderablePrimitives,
     sceneDrawCalls,
+    sceneDrawCallsWithoutInstancing,
+    estimatedDrawCallsAfterInstancing: Math.max(0, sceneDrawCalls - estimatedInstancingSavings),
+    repeatedGeometryGroups: [...repeatedGeometryGroups.values()]
+      .filter((group) => group.instances > 1).length,
+    repeatedGeometryMaterialGroups: [...repeatedGeometryMaterialGroups.values()]
+      .filter((group) => group.instances > 1).length,
+    repeatedMaterialCombinationGroups: [...repeatedMaterialCombinationGroups.values()]
+      .filter((group) => group.meshes.size > 1).length,
+    repeatedGeometryInstances: [...repeatedGeometryMaterialGroups.values()]
+      .filter((group) => group.instances > 1)
+      .reduce((sum, group) => sum + group.instances, 0),
+    estimatedInstancingSavings,
+    largestRepeatedGeometryGroups: summarizeRepeatedGroups(repeatedGeometryMaterialGroups),
     materials: materials.length,
     functionallyUniqueMaterials: functionalMaterialCount,
     duplicateMaterials: materials.length - functionalMaterialCount,
     materialCoreSignatures,
+    textureUsageSignatures,
     accessors: accessors.length,
     animations: gltf.animations?.length ?? 0,
     textures: textures.length,
@@ -438,9 +656,13 @@ export async function analyzeGLB(filePath) {
     alphaModeCounts,
     storedTriangles,
     sceneTriangles,
+    sceneAttributeCounts: Object.fromEntries(
+      Object.entries(sceneAttributeCounts).sort(([left], [right]) => left.localeCompare(right)),
+    ),
     averageTrianglesPerPrimitive: primitiveCount ? storedTriangles / primitiveCount : 0,
     invalidNumericValues,
     bounds,
+    cameraTarget,
     unused,
     oversizedTextureCount: imageRows.filter((image) => image.oversized).length,
     duplicateImageCount: imageHashes.length - new Set(imageHashes).size,

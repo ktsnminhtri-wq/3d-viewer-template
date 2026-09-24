@@ -1,4 +1,5 @@
 node_modules/
+logs/
 model-original.glb
 model-new.glb
 model-source-backup.glb
@@ -15,3 +16,7 @@ dist/current/*
 !dist/current/model.glb
 !dist/current/metadata.json
 .deploy-*.glb
+experimental/large-model-viewer/artifact/
+.chrome-*-test/
+.chrome-*-final*/
+.experimental-*-cdp.mjs

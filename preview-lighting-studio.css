@@ -49,6 +49,12 @@
   margin-top: 11px;
 }
 
+.lighting-studio__selectors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .lighting-studio__label {
   color: #d9dbd5;
 }
@@ -124,6 +130,28 @@
 
 .lighting-studio__status[data-state="error"] {
   color: #ffaaa0;
+}
+
+.lighting-studio__debug {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 9px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  color: #989c94;
+  font-size: 9px;
+}
+
+.lighting-studio__debug dt,
+.lighting-studio__debug dd {
+  margin: 0;
+}
+
+.lighting-studio__debug dd {
+  color: #c9ccc5;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 520px) {

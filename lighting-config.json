@@ -1,7 +1,7 @@
 {
-  "environment": "soft",
+  "environment": "neutral",
   "rotation": 0,
-  "exposure": 1.83,
-  "shadowIntensity": 0.33,
+  "exposure": 1.45,
+  "shadowIntensity": 0.8,
   "shadowSoftness": 1.07
 }

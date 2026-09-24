@@ -40,18 +40,17 @@
   function applyFraming({ resetTarget = false } = {}) {
     if (!framing) return;
 
-    const isTwoPoint = document.querySelector("#twoPointButton")?.getAttribute("aria-pressed") === "true";
     const currentOrbit = modelViewer.getCameraOrbit?.();
     const theta = resetTarget ? 0 : currentOrbit?.theta ?? 0;
-    const phi = isTwoPoint ? Math.PI / 2 : resetTarget ? (75 * Math.PI) / 180 : currentOrbit?.phi ?? (75 * Math.PI) / 180;
+    const phi = resetTarget ? (75 * Math.PI) / 180 : currentOrbit?.phi ?? (75 * Math.PI) / 180;
     const radius = resetTarget ? framing.radius : currentOrbit?.radius ?? framing.radius;
 
     if (resetTarget) {
       modelViewer.cameraTarget = `${framing.center[0]}m ${framing.center[1]}m ${framing.center[2]}m`;
     }
     modelViewer.cameraOrbit = `${theta}rad ${phi}rad ${radius}m`;
-    modelViewer.minCameraOrbit = `auto ${isTwoPoint ? "90deg" : "auto"} ${framing.minRadius}m`;
-    modelViewer.maxCameraOrbit = `auto ${isTwoPoint ? "90deg" : "auto"} ${framing.maxRadius}m`;
+    modelViewer.minCameraOrbit = `auto auto ${framing.minRadius}m`;
+    modelViewer.maxCameraOrbit = `auto auto ${framing.maxRadius}m`;
     modelViewer.jumpCameraToGoal?.();
   }
 
@@ -72,16 +71,15 @@
     requestAnimationFrame(() => applyFraming({ resetTarget: true }));
   });
 
-  document.querySelector("#resetButton")?.addEventListener("click", (event) => {
-    if (!framing) return;
-    event.stopImmediatePropagation();
-    modelViewer.fieldOfView = "30deg";
-    applyFraming({ resetTarget: true });
-  }, { capture: true });
-
-  for (const button of document.querySelectorAll("#twoPointButton, #threePointButton")) {
-    button.addEventListener("click", () => {
-      requestAnimationFrame(() => applyFraming());
-    });
-  }
+  Object.defineProperty(window, "__instancingCamera", {
+    configurable: true,
+    value: Object.freeze({
+      getFraming: () => framing ? {
+        center: [...framing.center],
+        radius: framing.radius,
+        minRadius: framing.minRadius,
+        maxRadius: framing.maxRadius,
+      } : null,
+    }),
+  });
 })();

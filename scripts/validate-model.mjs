@@ -185,6 +185,16 @@ export async function validateCandidate({
       `Rendered triangle count changed from ${before.sceneTriangles} to ${after.sceneTriangles}.`,
     ));
   }
+  for (const semantic of ["POSITION", "NORMAL", "TEXCOORD_0"]) {
+    const beforeCount = before.sceneAttributeCounts?.[semantic] ?? 0;
+    const afterCount = after.sceneAttributeCounts?.[semantic] ?? 0;
+    if (beforeCount !== afterCount) {
+      failures.push(issue(
+        `${semantic}_COUNT_CHANGED`,
+        `Scene ${semantic} element count changed from ${beforeCount} to ${afterCount}.`,
+      ));
+    }
+  }
   if (!boundsClose(before.bounds, after.bounds)) {
     failures.push(issue("BOUNDS_CHANGED", "World-space bounds changed beyond the validation tolerance."));
   }
@@ -195,6 +205,15 @@ export async function validateCandidate({
       failures.push(issue(
         "CORE_MATERIAL_CHANGED",
         `A source material core property set is missing in output: ${signature}`,
+      ));
+    }
+  }
+  const afterTextureUsages = new Set(after.textureUsageSignatures ?? []);
+  for (const signature of before.textureUsageSignatures ?? []) {
+    if (!afterTextureUsages.has(signature)) {
+      failures.push(issue(
+        "TEXTURE_USAGE_CHANGED",
+        `A source material texture-slot layout is missing in output: ${signature}`,
       ));
     }
   }

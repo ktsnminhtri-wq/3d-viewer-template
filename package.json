@@ -9,7 +9,13 @@
     "optimize:model": "node --max-old-space-size=4096 ./scripts/optimize-model.mjs",
     "validate:model": "node --max-old-space-size=4096 ./scripts/validate-model.mjs",
     "preview": "node --max-old-space-size=4096 ./scripts/preview-server.mjs",
-    "deploy": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs"
+    "preview:lan": "node --max-old-space-size=4096 ./scripts/preview-server.mjs --lan",
+    "deploy": "node --max-old-space-size=4096 ./scripts/deploy-model.mjs",
+    "test-model": "node --max-old-space-size=8192 ./scripts/test-model.mjs",
+    "deploy-model": "node --max-old-space-size=8192 ./scripts/deploy-current-model.mjs",
+    "experimental:build": "node --max-old-space-size=8192 ./scripts/build-large-model-prototype.mjs",
+    "experimental:preview": "node ./scripts/experimental-large-model-server.mjs",
+    "experimental:lan": "node ./scripts/experimental-large-model-server.mjs --lan"
   },
   "keywords": [],
   "author": "",

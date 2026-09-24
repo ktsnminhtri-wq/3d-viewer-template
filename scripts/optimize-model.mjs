@@ -6,7 +6,11 @@ import {
   NodeIO,
   PropertyType,
 } from "@gltf-transform/core";
-import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
+import {
+  ALL_EXTENSIONS,
+  EXTMeshGPUInstancing,
+  EXTTextureWebP,
+} from "@gltf-transform/extensions";
 import {
   compressTexture,
   dedup,
@@ -17,6 +21,12 @@ import {
   prune,
 } from "@gltf-transform/functions";
 import sharp from "sharp";
+import {
+  classifyModelComplexity,
+  COMPLEXITY_CLASSES,
+  optimizationPathFor,
+} from "./publisher-complexity.mjs";
+import { consolidateTrianglePrimitives } from "./primitive-consolidation.mjs";
 import { VIEWER_SAFE_PROFILE } from "./publisher-profile.mjs";
 
 function countPrimitiveTriangles(primitive) {
@@ -70,6 +80,10 @@ function collectStats(document) {
       (total, texture) => total + (texture.getImage()?.byteLength ?? 0),
       0,
     ),
+    averageTrianglesPerPrimitive: primitives.length
+      ? primitives.reduce((total, primitive) => total + countPrimitiveTriangles(primitive), 0)
+        / primitives.length
+      : 0,
   };
 }
 
@@ -115,11 +129,59 @@ function normalizeJoinedNormals(document) {
   }
 }
 
+function normalizeNodeRotations(document) {
+  let normalizedRotations = 0;
+  let normalizedInstanceRotations = 0;
+
+  for (const node of document.getRoot().listNodes()) {
+    const rotation = node.getRotation();
+    const length = Math.hypot(...rotation);
+    if (!Number.isFinite(length) || length <= 1e-12) {
+      throw new Error(`Optimizer produced an invalid rotation quaternion on node "${node.getName()}".`);
+    }
+    if (Math.abs(length - 1) > 1e-10) {
+      node.setRotation(rotation.map((value) => value / length));
+      normalizedRotations += 1;
+    }
+
+    const batchRotation = node
+      .getExtension("EXT_mesh_gpu_instancing")
+      ?.getAttribute("ROTATION");
+    const array = batchRotation?.getArray();
+    if (!(array instanceof Float32Array)) continue;
+    for (let index = 0; index < array.length; index += 4) {
+      const instanceLength = Math.hypot(
+        array[index],
+        array[index + 1],
+        array[index + 2],
+        array[index + 3],
+      );
+      if (!Number.isFinite(instanceLength) || instanceLength <= 1e-12) {
+        throw new Error("Optimizer produced an invalid instanced rotation quaternion.");
+      }
+      if (Math.abs(instanceLength - 1) <= 1e-6) continue;
+      for (let component = 0; component < 4; component += 1) {
+        array[index + component] /= instanceLength;
+      }
+      normalizedInstanceRotations += 1;
+    }
+    if (normalizedInstanceRotations > 0) batchRotation.setArray(array);
+  }
+
+  if (normalizedRotations > 0) {
+    console.info(`Normalized ${normalizedRotations} node rotation quaternion(s) after transforms.`);
+  }
+  if (normalizedInstanceRotations > 0) {
+    console.info(`Normalized ${normalizedInstanceRotations} instanced rotation quaternion(s) after transforms.`);
+  }
+}
+
 export async function optimizeModel({
   inputPath,
   outputPath,
   reportPath = null,
   profile = VIEWER_SAFE_PROFILE,
+  sourceAnalysis = null,
 } = {}) {
   if (!inputPath || !outputPath) {
     throw new Error("optimizeModel requires explicit inputPath and outputPath.");
@@ -130,60 +192,86 @@ export async function optimizeModel({
 
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
   io.setLogger(new Logger(Logger.Verbosity.WARN));
+  const timings = {};
+  async function timed(stage, operation) {
+    const started = performance.now();
+    const result = await operation();
+    timings[stage] = Math.round(performance.now() - started);
+    console.info(`Stage ${stage}: ${timings[stage]} ms`);
+    return result;
+  }
   console.info(`Reading ${inputPath}...`);
-  const document = await io.read(inputPath);
-  const before = collectStats(document);
-  const memorySafeMetadataPath = before.nodes > 100_000 && before.materials > 5_000;
+  const document = await timed("read", () => io.read(inputPath));
+  const before = await timed("collectBefore", () => collectStats(document));
+  const classification = classifyModelComplexity(sourceAnalysis ?? before);
+  const optimizationPath = optimizationPathFor(classification.complexityClass);
+  const scalableConsolidation = [
+    COMPLEXITY_CLASSES.LARGE,
+    COMPLEXITY_CLASSES.HIGHLY_FRAGMENTED,
+  ].includes(classification.complexityClass);
+  const joinAcrossSiblingMeshes = before.primitives > 2_000;
+  let consolidation = {
+    inputPrimitives: before.primitives,
+    outputPrimitives: before.primitives,
+    consolidationGroupCount: 0,
+    joinedPrimitiveCount: 0,
+    mergedPrimitiveCount: 0,
+  };
+  console.info(`Complexity: ${classification.complexityClass}`);
+  console.info(`Optimization path: ${optimizationPath}`);
   console.info("Before transforms:", before);
 
   // Ignore exporter-generated names, but retain all render properties, texture
   // relationships, extensions, and extras when comparing materials.
-  await document.transform(
+  await timed("dedupMaterialsInitial", () => document.transform(
     dedup({
       keepUniqueNames: false,
       propertyTypes: [PropertyType.MATERIAL],
     }),
-  );
+  ));
 
-  if (memorySafeMetadataPath) {
-    // Extremely fragmented SketchUp exports can exceed V8's maximum Set size
-    // inside join. Deduplicate in bounded passes, flatten world transforms, and
-    // batch repeated meshes with model-viewer-compatible GPU instancing.
-    console.info("Using memory-safe instancing path; preserving rendered triangles.");
-    await document.transform(
-      prune({
+  if (scalableConsolidation) {
+    // Consolidate each shared Mesh definition once before global accessor/mesh
+    // deduplication. This keeps the algorithm linear in primitive count and
+    // avoids join() cloning work across every scene Node.
+    consolidation = await timed(
+      "primitiveConsolidation",
+      () => consolidateTrianglePrimitives(document),
+    );
+    await timed("pruneStructure", () => document.transform(prune({
         keepAttributes: true,
         keepExtras: false,
         keepLeaves: false,
         keepSolidTextures: true,
-      }),
-      dedup({
+      })));
+    await timed("dedupAccessors", () => document.transform(dedup({
         keepUniqueNames: false,
         propertyTypes: [PropertyType.ACCESSOR],
-      }),
-      dedup({
+      })));
+    await timed("dedupMeshes", () => document.transform(dedup({
         keepUniqueNames: false,
         propertyTypes: [PropertyType.MESH],
-      }),
-      flatten(),
-      instance({ min: 2 }),
-    );
-  } else {
-    // Preserve Mesh/Node boundaries and join only compatible Primitives within
-    // their existing Mesh.
-    await document.transform(
-      join({
-        keepMeshes: true,
+      })));
+    await timed("flatten", () => document.transform(flatten()));
+    if (profile.runtimeInstancing) {
+      await timed("instance", () => document.transform(instance({ min: profile.minimumInstanceCount })));
+    }
+  } else if (classification.complexityClass === COMPLEXITY_CLASSES.MEDIUM) {
+    // Join compatible static sibling meshes within each hierarchy level. This
+    // avoids one global building mesh while still batching exact materials and
+    // preserving world-space geometry.
+    await timed("join", () => document.transform(join({
+        keepMeshes: !joinAcrossSiblingMeshes,
         keepNamed: false,
         cleanup: false,
-      }),
-      prune({
+      })));
+    await timed("pruneStructure", () => document.transform(prune({
         keepAttributes: true,
         keepExtras: false,
         keepLeaves: false,
         keepSolidTextures: true,
-      }),
-      dedup({
+      })));
+    await timed("dedupStructure", () => document.transform(dedup({
         keepUniqueNames: false,
         propertyTypes: [
           PropertyType.ACCESSOR,
@@ -191,11 +279,24 @@ export async function optimizeModel({
           PropertyType.TEXTURE,
           PropertyType.MATERIAL,
         ],
-      }),
-    );
-    normalizeJoinedNormals(document);
+      })));
+    await timed("normalizeJoinedNormals", () => normalizeJoinedNormals(document));
+    if (profile.runtimeInstancing) {
+      await timed("flatten", () => document.transform(flatten()));
+      await timed("instance", () => document.transform(instance({ min: profile.minimumInstanceCount })));
+    }
+  } else {
+    // SMALL: retain the original mesh layout and only perform correctness-safe
+    // cleanup. Do not pay for join, accessor hashing, flatten, or consolidation.
+    await timed("pruneStructure", () => document.transform(prune({
+      keepAttributes: true,
+      keepExtras: false,
+      keepLeaves: false,
+      keepSolidTextures: true,
+    })));
   }
 
+  await timed("textures", async () => {
   for (const texture of document.getRoot().listTextures()) {
     const image = texture.getImage();
     if (!image) continue;
@@ -224,6 +325,7 @@ export async function optimizeModel({
         : { lossless: true }),
     });
   }
+  });
 
   if (document.getRoot().listTextures().some((texture) => texture.getMimeType() === "image/webp")) {
     const existingWebPExtension = document
@@ -233,20 +335,29 @@ export async function optimizeModel({
     (existingWebPExtension ?? document.createExtension(EXTTextureWebP)).setRequired(true);
   }
 
-  await document.transform(
-    dedup({
+  await timed("dedupTexturesMaterialsFinal", () => document.transform(dedup({
       keepUniqueNames: false,
       propertyTypes: [PropertyType.TEXTURE, PropertyType.MATERIAL],
-    }),
-    prune({
+    })));
+  await timed("pruneFinal", () => document.transform(prune({
       keepAttributes: true,
       keepExtras: false,
       keepLeaves: false,
       keepSolidTextures: true,
-    }),
-  );
+    })));
 
-  const after = collectStats(document);
+  // Transform flattening/joining can introduce small floating-point drift in
+  // decomposed node rotations. glTF requires every stored quaternion to be a
+  // unit quaternion, so normalize only that representation before validation.
+  await timed("normalizeRotations", () => normalizeNodeRotations(document));
+
+  const instancingExtension = document
+    .getRoot()
+    .listExtensionsUsed()
+    .find((extension) => extension.extensionName === EXTMeshGPUInstancing.EXTENSION_NAME);
+  if (instancingExtension) instancingExtension.setRequired(true);
+
+  const after = await timed("collectAfter", () => collectStats(document));
   if (profile.preserveRenderedTriangles && after.sceneTriangles !== before.sceneTriangles) {
     throw new Error(
       `Rendered scene triangle count changed from ${before.sceneTriangles} to ${after.sceneTriangles}. Refusing output.`,
@@ -255,23 +366,33 @@ export async function optimizeModel({
 
   console.info("After transforms:", after);
   console.info(`Writing ${outputPath}...`);
-  await io.write(outputPath, document);
+  await timed("write", () => io.write(outputPath, document));
   if (reportPath) {
     await writeFile(
       reportPath,
       `${JSON.stringify({
         profile: profile.name,
-        strategy: memorySafeMetadataPath ? "memory-safe-metadata" : "full-viewer-safe",
+        strategy: optimizationPath,
+        complexity: classification,
+        consolidation,
         input: path.basename(inputPath),
         output: path.basename(outputPath),
         before,
         after,
+        timings,
       }, null, 2)}\n`,
       "utf8",
     );
   }
   console.info("Optimization completed successfully without geometry simplification.");
-  return { before, after };
+  return {
+    before,
+    after,
+    timings,
+    complexity: classification,
+    optimizationPath,
+    consolidation,
+  };
 }
 
 const isCLI = process.argv[1]

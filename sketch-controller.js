@@ -7,6 +7,7 @@ import {
   isStrokeReferenceVisible,
   resolveStrokePoint,
 } from "./sketch-spatial-model.js";
+import { getViewerQualityState } from "./viewer-quality.js";
 
 const modelViewer = document.querySelector("#modelViewer");
 const viewerShell = document.querySelector("#viewerShell");
@@ -38,6 +39,8 @@ if (modelViewer && viewerShell) {
       <dt>XYZ</dt><dd data-sketch-debug="xyz">—</dd>
       <dt>pressure</dt><dd data-sketch-debug="pressure">0.000</dd>
       <dt>stroke points</dt><dd data-sketch-debug="pointCount">0</dd>
+      <dt>quality</dt><dd data-sketch-debug="qualityProfile">auto</dd>
+      <dt>overlay DPR</dt><dd data-sketch-debug="overlayDpr">—</dd>
     </dl>
     <div class="sketch-debug__actions">
       <button type="button" data-sketch-action="undo" disabled>Undo</button>
@@ -200,6 +203,7 @@ if (modelViewer && viewerShell) {
   let modelDiagonal = 1;
   let surfaceOffset = 0.00002;
   let renderRequested = false;
+  let overlayWasRendered = false;
   let lastProjectionError = null;
   let maximumProjectionError = 0;
   const tracePlaneOffsets = new Map();
@@ -787,9 +791,26 @@ if (modelViewer && viewerShell) {
     return true;
   }
 
+  function hasVisibleOverlayContent() {
+    if (activeStroke || strokeRenderStates.size || guideDraftLine.visible) return true;
+    for (const mesh of guideVisuals.values()) {
+      if (mesh.visible) return true;
+    }
+    return false;
+  }
+
   function renderScene() {
     renderRequested = false;
-    if (syncCamera()) renderer.render(scene, camera);
+    const hasContent = hasVisibleOverlayContent();
+    if (!hasContent) {
+      if (overlayWasRendered) renderer.clear();
+      overlayWasRendered = false;
+      return;
+    }
+    if (syncCamera()) {
+      renderer.render(scene, camera);
+      overlayWasRendered = true;
+    }
     if (
       modelViewer.hasAttribute("auto-rotate")
       && (strokes.length > 0 || activeStroke)
@@ -806,8 +827,15 @@ if (modelViewer && viewerShell) {
 
   function resizeRenderer() {
     const rect = viewerShell.getBoundingClientRect();
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const quality = getViewerQualityState();
+    const dprCap = quality.profile?.overlayDprCap ?? 2;
+    const overlayDpr = Math.min(window.devicePixelRatio || 1, dprCap);
+    renderer.setPixelRatio(overlayDpr);
     renderer.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false);
+    if (debug.qualityProfile) {
+      debug.qualityProfile.textContent = `${quality.mode} → ${quality.selectedProfile}`;
+      debug.overlayDpr.textContent = overlayDpr.toFixed(2);
+    }
     requestRender();
   }
 
@@ -933,15 +961,10 @@ if (modelViewer && viewerShell) {
     const currentCameraDirection = camera.position.clone().normalize();
     if (direction.dot(currentCameraDirection) < 0) direction.negate();
 
-    const twoPointMode = document.querySelector("#twoPointButton")
-      ?.getAttribute("aria-pressed") === "true";
-    if (twoPointMode) {
-      direction.y = 0;
-      if (direction.lengthSq() <= 1e-8) {
-        showGuideMessage("Use 3P for this Guide", { transient: true });
-        return false;
-      }
-      direction.normalize();
+    const currentViewMode = window.__viewerViewMode?.getState?.().viewMode;
+    if (currentViewMode && currentViewMode !== "perspective") {
+      showGuideMessage("Use Perspective for this Guide", { transient: true });
+      return false;
     }
 
     const spherical = new THREE.Spherical().setFromVector3(
@@ -1650,7 +1673,9 @@ if (modelViewer && viewerShell) {
   modelViewer.addEventListener("pointerup", onPointerEnd, { capture: true });
   modelViewer.addEventListener("pointercancel", onPointerEnd, { capture: true });
   modelViewer.addEventListener("lostpointercapture", onPointerEnd, { capture: true });
-  modelViewer.addEventListener("camera-change", requestRender);
+  modelViewer.addEventListener("camera-change", () => {
+    if (hasVisibleOverlayContent()) requestRender();
+  });
   modelViewer.addEventListener("load", () => {
     updateSurfaceOffset();
     resizeRenderer();
@@ -1665,6 +1690,7 @@ if (modelViewer && viewerShell) {
   const resizeObserver = new ResizeObserver(resizeRenderer);
   resizeObserver.observe(viewerShell);
   window.addEventListener("resize", resizeRenderer);
+  window.addEventListener("viewer-quality-change", resizeRenderer);
   document.addEventListener("fullscreenchange", resizeRenderer);
   updateDrawingSupportUI();
   resizeRenderer();
@@ -1691,6 +1717,7 @@ if (modelViewer && viewerShell) {
       strokeCount: strokes.length,
       renderObjectCount: strokeRenderStates.size,
       primarySurfaceReferenceId: primaryModelSurfaceId,
+      quality: getViewerQualityState(),
     }),
   });
 

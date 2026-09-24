@@ -20,10 +20,17 @@ const PUBLISHED_MODEL = path.join(ROOT, "dist", "current", "model.glb");
 const PRODUCTION_MODEL = path.join(ROOT, "model.glb");
 const PUBLISHED_MODEL_GIT_PATH = "dist/current/model.glb";
 const PUBLISHED_METADATA_GIT_PATH = "dist/current/metadata.json";
+const ARTIFACT_DEPLOY_PATHS = [
+  "model.glb",
+  PUBLISHED_MODEL_GIT_PATH,
+  PUBLISHED_METADATA_GIT_PATH,
+];
 const DEPLOY_PATHS = [
   ".gitignore",
   ".nojekyll",
   "AGENTS.md",
+  "TEST_MODEL.bat",
+  "DEPLOY_MODEL.bat",
   "README.md",
   "package.json",
   "package-lock.json",
@@ -31,6 +38,7 @@ const DEPLOY_PATHS = [
   "styles.css",
   "app.js",
   "instancing-camera.js",
+  "viewer-quality.js",
   "sketch.css",
   "sketch-controller.js",
   "sketch-spatial-model.js",
@@ -42,15 +50,20 @@ const DEPLOY_PATHS = [
   PUBLISHED_METADATA_GIT_PATH,
   "assets/spruit-sunrise-1k-hdr.jpg",
   "scripts/deploy-model.mjs",
+  "scripts/deploy-current-model.mjs",
   "scripts/glb-utils.mjs",
   "scripts/khronos-validator-worker.mjs",
   "scripts/lighting-config.mjs",
   "scripts/optimize-model.mjs",
+  "scripts/one-click-workflow.mjs",
   "scripts/preview-server.mjs",
+  "scripts/primitive-consolidation.mjs",
   "scripts/publish-model.mjs",
+  "scripts/publisher-complexity.mjs",
   "scripts/publisher-core.mjs",
   "scripts/publisher-profile.mjs",
   "scripts/validate-model.mjs",
+  "scripts/test-model.mjs",
 ];
 
 function run(command, args, { capture = false, allowFailure = false } = {}) {
@@ -81,7 +94,7 @@ function git(args, options) {
   return run("git", args, options);
 }
 
-function githubPagesURL(remoteURL) {
+export function githubPagesURL(remoteURL) {
   const normalized = remoteURL.trim().replace(/\.git$/, "");
   const match = normalized.match(/github\.com[/:]([^/]+)\/([^/]+)$/i);
   if (!match) return "Unable to derive GitHub Pages URL from origin.";
@@ -127,14 +140,22 @@ async function validateLocalProduction(metadata) {
   try {
     const baseURL = `http://127.0.0.1:${server.address().port}`;
     const version = metadata.output.sha256.slice(0, 12);
-    const [indexResponse, appResponse, modelResponse, publishedModelResponse, metadataResponse] = await Promise.all([
+    const [
+      indexResponse,
+      appResponse,
+      qualityResponse,
+      modelResponse,
+      publishedModelResponse,
+      metadataResponse,
+    ] = await Promise.all([
       fetch(`${baseURL}/?model=./dist/current/model.glb&v=${version}`),
       fetch(`${baseURL}/app.js`),
+      fetch(`${baseURL}/viewer-quality.js`),
       fetch(`${baseURL}/model.glb`, { method: "HEAD" }),
       fetch(`${baseURL}/dist/current/model.glb`, { method: "HEAD" }),
       fetch(`${baseURL}/dist/current/metadata.json`),
     ]);
-    if (!indexResponse.ok || !appResponse.ok || !modelResponse.ok
+    if (!indexResponse.ok || !appResponse.ok || !qualityResponse.ok || !modelResponse.ok
       || !publishedModelResponse.ok || !metadataResponse.ok) {
       throw new Error("Local production server could not serve the viewer and published artifact.");
     }
@@ -151,6 +172,9 @@ async function validateLocalProduction(metadata) {
     }
     if (!(await appResponse.text()).includes('search.get("v")')) {
       throw new Error("Viewer cache-busting support is missing.");
+    }
+    if (!(await qualityResponse.text()).includes("minimumRenderScale")) {
+      throw new Error("Viewer quality profiles are missing.");
     }
   } finally {
     await closeServer(server);
@@ -176,9 +200,9 @@ async function assertGitReadyForDeployment() {
   }
 }
 
-async function commitAndPush() {
+async function commitAndPush({ paths = DEPLOY_PATHS, commitMessage = "Publish validated GLB artifact" } = {}) {
   await assertGitReadyForDeployment();
-  await git(["add", "-A", "--", ...DEPLOY_PATHS]);
+  await git(["add", "-A", "--", ...paths]);
   const stagedFiles = await listStagedFiles();
   const allowedPublishedFiles = new Set([PUBLISHED_MODEL_GIT_PATH, PUBLISHED_METADATA_GIT_PATH]);
   const forbidden = /^(?:node_modules\/|model-original\.glb$|model-new\.glb$|model-source-backup\.glb$|model-optimized\.glb$|\.preview-validation\.json$|\.deploy-)/i;
@@ -196,7 +220,7 @@ async function commitAndPush() {
     }
   }
   if (stagedFiles.length) {
-    await git(["commit", "-m", "Publish validated GLB artifact"]);
+    await git(["commit", "-m", commitMessage]);
   } else {
     console.info("No deployment changes to commit.");
   }
@@ -204,39 +228,64 @@ async function commitAndPush() {
   return (await git(["remote", "get-url", "origin"], { capture: true })).stdout.trim();
 }
 
-async function main() {
+export async function deployModel({
+  artifactOnly = false,
+  commitMessage = "Publish validated GLB artifact",
+  dryRun = false,
+} = {}) {
   await assertGitReadyForDeployment();
   const { metadata } = await validatePublishedArtifact({ root: ROOT });
   if (metadata.output.sizeBytes > GITHUB_FILE_LIMIT) {
     throw new Error("Published model exceeds GitHub's 100 MiB file limit.");
   }
   await verifyPreviewReceipt(ROOT);
-  await bakeLightingIntoViewer(ROOT, await readLightingConfig(ROOT, { create: true }));
-  await verifyPreviewReceipt(ROOT);
+  if (!artifactOnly) {
+    await bakeLightingIntoViewer(ROOT, await readLightingConfig(ROOT, { create: true }));
+    await verifyPreviewReceipt(ROOT);
+  }
 
   const installation = await installProductionModel();
   try {
     await validateLocalProduction(metadata);
-    await installation.commit();
+    if (dryRun) await installation.rollback();
+    else await installation.commit();
   } catch (error) {
     await installation.rollback();
     throw error;
   }
 
-  const remoteURL = await commitAndPush();
+  const remoteURL = dryRun
+    ? (await git(["remote", "get-url", "origin"], { capture: true })).stdout.trim()
+    : await commitAndPush({
+        paths: artifactOnly ? ARTIFACT_DEPLOY_PATHS : DEPLOY_PATHS,
+        commitMessage,
+      });
   const pagesURL = githubPagesURL(remoteURL);
   const version = metadata.output.sha256.slice(0, 12);
-  console.info("\nDeployment completed from dist/current.");
-  console.info(`Model size:   ${(metadata.output.sizeBytes / (1024 * 1024)).toFixed(2)} MiB`);
-  console.info(`Model SHA:    ${metadata.output.sha256}`);
-  console.info(`Viewer:       ${pagesURL}?model=./dist/current/model.glb&v=${version}`);
-  console.info(`Model:        ${pagesURL}dist/current/model.glb?v=${version}`);
-  console.info(`Metadata:     ${pagesURL}dist/current/metadata.json?v=${version}`);
+  return {
+    dryRun,
+    metadata,
+    pagesURL,
+    viewerURL: `${pagesURL}?model=./dist/current/model.glb&v=${version}`,
+    modelURL: `${pagesURL}dist/current/model.glb?v=${version}`,
+    metadataURL: `${pagesURL}dist/current/metadata.json?v=${version}`,
+  };
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(`\nDEPLOYMENT STOPPED SAFELY\n${error.message}`);
-  process.exitCode = 1;
+const isCLI = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isCLI) {
+  try {
+    const result = await deployModel({ dryRun: process.argv.includes("--dry-run") });
+    console.info(result.dryRun
+      ? "\nDeployment dry run completed. No commit or push was made."
+      : "\nDeployment completed from dist/current.");
+    console.info(`Model size:   ${(result.metadata.output.sizeBytes / (1024 * 1024)).toFixed(2)} MiB`);
+    console.info(`Model SHA:    ${result.metadata.output.sha256}`);
+    console.info(`Viewer:       ${result.viewerURL}`);
+    console.info(`Model:        ${result.modelURL}`);
+    console.info(`Metadata:     ${result.metadataURL}`);
+  } catch (error) {
+    console.error(`\nDEPLOYMENT STOPPED SAFELY\n${error.message}`);
+    process.exitCode = 1;
+  }
 }

@@ -72,9 +72,33 @@ async function copyExternalResources(sourcePath, tempSourcePath, analysis) {
   }
 }
 
-function metadataFrom({ sourcePath, sourceHash, outputHash, before, after, profile, warnings }) {
+function metadataFrom({
+  sourcePath,
+  sourceHash,
+  outputHash,
+  before,
+  after,
+  profile,
+  warnings,
+  optimization,
+  preprocessingTimings,
+}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    complexityClass: optimization.complexity.complexityClass,
+    complexityMetrics: optimization.complexity.metrics,
+    optimizationPath: optimization.optimizationPath,
+    preprocessingTimingsMs: { ...preprocessingTimings },
+    primitivesBefore: before.primitives,
+    primitivesAfter: after.primitives,
+    geometriesBefore: before.renderablePrimitives,
+    geometriesAfter: after.renderablePrimitives,
+    estimatedDrawCallsBefore: before.sceneDrawCalls,
+    estimatedDrawCallsAfter: after.sceneDrawCalls,
+    mergedPrimitiveCount: optimization.consolidation.mergedPrimitiveCount,
+    consolidationGroupCount: optimization.consolidation.consolidationGroupCount,
+    trianglesBefore: before.sceneTriangles,
+    trianglesAfter: after.sceneTriangles,
     source: {
       name: path.basename(sourcePath),
       sizeBytes: before.totalBytes,
@@ -90,7 +114,9 @@ function metadataFrom({ sourcePath, sourceHash, outputHash, before, after, profi
       scenes: after.scenes,
       nodes: after.nodes,
       meshes: after.meshes,
+      meshInstances: after.meshInstances,
       primitives: after.primitives,
+      drawCalls: after.sceneDrawCalls,
       storedTriangles: after.storedTriangles,
       renderedTriangles: after.sceneTriangles,
       materials: after.materials,
@@ -102,6 +128,7 @@ function metadataFrom({ sourcePath, sourceHash, outputHash, before, after, profi
       max: after.bounds.max,
       size: after.bounds.size,
       center: after.bounds.center,
+      cameraTarget: after.cameraTarget,
       distanceFromOrigin: after.bounds.distanceFromOrigin,
     },
     textures: {
@@ -110,6 +137,14 @@ function metadataFrom({ sourcePath, sourceHash, outputHash, before, after, profi
       maxWidth: after.maxTextureWidth,
       maxHeight: after.maxTextureHeight,
       transparentCount: after.transparentTextureCount,
+      oversizedCount: after.oversizedTextureCount,
+      duplicateCount: after.duplicateImageCount,
+      estimatedGPUBytesRGBA8WithMipmaps: after.estimatedTextureGPUBytes,
+    },
+    materials: {
+      alphaModeCounts: after.alphaModeCounts,
+      blendedCount: after.alphaModeCounts.BLEND ?? 0,
+      maskedCount: after.alphaModeCounts.MASK ?? 0,
     },
     extensions: {
       used: after.extensionsUsed,
@@ -121,6 +156,27 @@ function metadataFrom({ sourcePath, sourceHash, outputHash, before, after, profi
       colorTextureQuality: profile.colorTextureQuality,
       webpEffort: profile.webpEffort,
       preserveRenderedTriangles: profile.preserveRenderedTriangles,
+      runtimeInstancing: profile.runtimeInstancing,
+      minimumInstanceCount: profile.minimumInstanceCount,
+    },
+    runtimeOptimization: {
+      removedNodes: Math.max(0, before.nodes - after.nodes),
+      mergedMeshes: Math.max(0, before.meshes - after.meshes),
+      mergedPrimitives: Math.max(0, before.primitives - after.primitives),
+      repeatedGeometryGroups: after.repeatedGeometryMaterialGroups,
+      repeatedGeometryInstances: after.repeatedGeometryInstances,
+      instancingUsed: after.instancedBatchCount > 0,
+      instanceBatches: after.instancedBatchCount,
+      instancesBatched: after.instancedInstanceCount,
+      estimatedDrawCallsBefore: before.sceneDrawCalls,
+      estimatedDrawCallsAfter: after.sceneDrawCalls,
+      estimatedDrawCallsWithoutInstancing: after.sceneDrawCallsWithoutInstancing,
+      estimatedDrawCallSavingsFromInstancing:
+        after.sceneDrawCallsWithoutInstancing - after.sceneDrawCalls,
+      estimatedDrawCallsIfInstanced: after.estimatedDrawCallsAfterInstancing,
+      potentialDrawCallSavingsFromInstancing: after.estimatedInstancingSavings,
+      repeatedGeometryTopGroups: after.largestRepeatedGeometryGroups,
+      consolidation: optimization.consolidation,
     },
     validation: {
       passed: true,
@@ -170,8 +226,21 @@ export async function publishModel(sourceArgument, {
     throw new Error("Source cannot be inside dist/current because publishing replaces that directory.");
   }
 
-  const sourceHash = await sha256File(sourcePath);
-  const jobDirectory = await mkdtemp(path.join(os.tmpdir(), "glb-publisher-"));
+  const publishStarted = performance.now();
+  const preprocessingTimings = {};
+  async function timed(stage, operation) {
+    const started = performance.now();
+    const result = await operation();
+    preprocessingTimings[stage] = Math.round(performance.now() - started);
+    console.info(`Stage ${stage}: ${preprocessingTimings[stage]} ms`);
+    return result;
+  }
+
+  const sourceHash = await timed("sourceHash", () => sha256File(sourcePath));
+  const jobDirectory = await timed(
+    "workspacePreparation",
+    () => mkdtemp(path.join(os.tmpdir(), "glb-publisher-")),
+  );
   const tempSourcePath = path.join(jobDirectory, "source.glb");
   const candidatePath = path.join(jobDirectory, "candidate.glb");
   const transformReportPath = path.join(jobDirectory, "optimization.json");
@@ -179,9 +248,12 @@ export async function publishModel(sourceArgument, {
 
   try {
     console.info(`Preflight: ${path.basename(sourcePath)} (${formatMiB(sourceStats.size)})`);
-    const sourceAnalysis = await analyzeGLB(sourcePath);
-    await runKhronosValidation(sourcePath, { projectRoot });
-    const preflight = evaluatePublishability(sourceAnalysis, { profile, candidate: false });
+    const sourceAnalysis = await timed("sourceAnalysis", () => analyzeGLB(sourcePath));
+    await timed("sourceValidation", () => runKhronosValidation(sourcePath, { projectRoot }));
+    const preflight = await timed(
+      "sourcePreflight",
+      () => evaluatePublishability(sourceAnalysis, { profile, candidate: false }),
+    );
     if (preflight.errors.length) {
       throw new Error(`Source preflight failed:\n${preflight.errors.map((item) => `- ${item.code}: ${item.message}`).join("\n")}`);
     }
@@ -189,31 +261,38 @@ export async function publishModel(sourceArgument, {
     console.info("Source size:", sourceAnalysis.bounds.size);
     console.info(`Distance from origin: ${sourceAnalysis.bounds.distanceFromOrigin}`);
 
-    await copyFile(sourcePath, tempSourcePath);
-    await copyExternalResources(sourcePath, tempSourcePath, sourceAnalysis);
-    await optimizeModel({
+    await timed("workspaceCopy", async () => {
+      await copyFile(sourcePath, tempSourcePath);
+      await copyExternalResources(sourcePath, tempSourcePath, sourceAnalysis);
+    });
+    const optimization = await timed("optimizationTotal", () => optimizeModel({
       inputPath: tempSourcePath,
       outputPath: candidatePath,
       reportPath: transformReportPath,
       profile,
-    });
+      sourceAnalysis,
+    }));
+    for (const [stage, duration] of Object.entries(optimization.timings)) {
+      preprocessingTimings[`optimize.${stage}`] = duration;
+    }
 
-    const candidateAnalysis = await analyzeGLB(candidatePath);
-    const validation = await validateCandidate({
+    const candidateAnalysis = await timed("candidateAnalysis", () => analyzeGLB(candidatePath));
+    const validation = await timed("finalValidation", () => validateCandidate({
       sourcePath: tempSourcePath,
       candidatePath,
       sourceAnalysis,
       candidateAnalysis,
       profile,
       projectRoot,
-    });
-    const currentSourceHash = await sha256File(sourcePath);
+    }));
+    const currentSourceHash = await timed("sourceHashVerification", () => sha256File(sourcePath));
     if (currentSourceHash !== sourceHash) {
       throw new Error("Source GLB changed while publishing. Output was not installed.");
     }
 
-    const outputHash = await sha256File(candidatePath);
-    const metadata = metadataFrom({
+    const outputHash = await timed("outputHash", () => sha256File(candidatePath));
+    preprocessingTimings.totalBeforeMetadata = Math.round(performance.now() - publishStarted);
+    const metadata = await timed("metadataCreation", () => metadataFrom({
       sourcePath,
       sourceHash,
       outputHash,
@@ -221,18 +300,23 @@ export async function publishModel(sourceArgument, {
       after: candidateAnalysis,
       profile,
       warnings: [...preflight.warnings, ...validation.warnings],
-    });
+      optimization,
+      preprocessingTimings,
+    }));
+    metadata.preprocessingTimingsMs = { ...preprocessingTimings };
 
     const distDirectory = path.dirname(outputDirectory);
-    await mkdir(distDirectory, { recursive: true });
-    stageDirectory = await mkdtemp(path.join(distDirectory, ".current-stage-"));
-    await copyFile(candidatePath, path.join(stageDirectory, "model.glb"));
-    await writeFile(
-      path.join(stageDirectory, "metadata.json"),
-      `${JSON.stringify(metadata, null, 2)}\n`,
-      "utf8",
-    );
-    await replaceCurrentDirectory(stageDirectory, outputDirectory);
+    await timed("artifactInstall", async () => {
+      await mkdir(distDirectory, { recursive: true });
+      stageDirectory = await mkdtemp(path.join(distDirectory, ".current-stage-"));
+      await copyFile(candidatePath, path.join(stageDirectory, "model.glb"));
+      await writeFile(
+        path.join(stageDirectory, "metadata.json"),
+        `${JSON.stringify(metadata, null, 2)}\n`,
+        "utf8",
+      );
+      await replaceCurrentDirectory(stageDirectory, outputDirectory);
+    });
     stageDirectory = null;
 
     const reduction = sourceAnalysis.totalBytes

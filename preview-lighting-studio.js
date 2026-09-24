@@ -1,3 +1,10 @@
+import {
+  getViewerQualityState,
+  setBaseLighting,
+  setDisplayPreset,
+  setQualityMode,
+} from "./viewer-quality.js";
+
 const DEFAULTS = Object.freeze({
   environment: "warm",
   rotation: 0,
@@ -28,6 +35,24 @@ studio.innerHTML = `
     <strong>Lighting Studio</strong>
     <span class="lighting-studio__badge">Local preview</span>
   </div>
+  <div class="lighting-studio__selectors">
+    <label class="lighting-studio__field">
+      <span class="lighting-studio__label"><span>Display</span></span>
+      <select data-display-preset>
+        <option value="faithful">SketchUp-like / Faithful</option>
+        <option value="presentation">Presentation</option>
+      </select>
+    </label>
+    <label class="lighting-studio__field">
+      <span class="lighting-studio__label"><span>Quality</span></span>
+      <select data-quality-mode>
+        <option value="auto">Auto</option>
+        <option value="high">High</option>
+        <option value="balanced">Balanced</option>
+        <option value="mobile">Mobile</option>
+      </select>
+    </label>
+  </div>
   <label class="lighting-studio__field">
     <span class="lighting-studio__label"><span>Environment</span></span>
     <select data-lighting="environment">
@@ -55,6 +80,16 @@ studio.innerHTML = `
     <button type="button" class="lighting-studio__save" data-action="save">Save Lighting</button>
   </div>
   <p class="lighting-studio__status" data-status aria-live="polite"></p>
+  <dl class="lighting-studio__debug" aria-label="Viewer performance debug">
+    <dt>Selected</dt><dd data-quality-debug="selected">—</dd>
+    <dt>DPR</dt><dd data-quality-debug="dpr">—</dd>
+    <dt>Render</dt><dd data-quality-debug="render">—</dd>
+    <dt>Draw calls</dt><dd data-quality-debug="drawCalls">—</dd>
+    <dt>Triangles</dt><dd data-quality-debug="triangles">—</dd>
+    <dt>Texture GPU</dt><dd data-quality-debug="textureGPU">—</dd>
+    <dt>Load / usable</dt><dd data-quality-debug="timing">—</dd>
+    <dt>Camera events</dt><dd data-quality-debug="cameraEvents">—</dd>
+  </dl>
 `;
 document.body.append(studio);
 
@@ -65,6 +100,12 @@ const outputs = Object.fromEntries(
   [...studio.querySelectorAll("[data-output]")].map((element) => [element.dataset.output, element]),
 );
 const status = studio.querySelector("[data-status]");
+const displayPresetControl = studio.querySelector("[data-display-preset]");
+const qualityModeControl = studio.querySelector("[data-quality-mode]");
+const qualityDebug = Object.fromEntries(
+  [...studio.querySelectorAll("[data-quality-debug]")]
+    .map((element) => [element.dataset.qualityDebug, element]),
+);
 let config = { ...DEFAULTS };
 let appliedRotation = 0;
 
@@ -91,11 +132,13 @@ function rotateEnvironment(newRotation) {
 
 function applyLighting(nextConfig, { preserveView = true } = {}) {
   config = { ...config, ...nextConfig };
-  modelViewer.environmentImage = ENVIRONMENTS[config.environment];
-  modelViewer.toneMapping = config.environment === "soft" ? "agx" : "neutral";
-  modelViewer.exposure = Number(config.exposure);
-  modelViewer.shadowIntensity = Number(config.shadowIntensity);
-  modelViewer.shadowSoftness = Number(config.shadowSoftness);
+  setBaseLighting({
+    environmentImage: ENVIRONMENTS[config.environment],
+    toneMapping: config.environment === "soft" ? "agx" : "neutral",
+    exposure: Number(config.exposure),
+    shadowIntensity: Number(config.shadowIntensity),
+    shadowSoftness: Number(config.shadowSoftness),
+  });
   if (preserveView) rotateEnvironment(Number(config.rotation));
   else {
     modelViewer.orientation = `0deg ${config.rotation}deg 0deg`;
@@ -106,12 +149,58 @@ function applyLighting(nextConfig, { preserveView = true } = {}) {
 
 for (const [key, control] of Object.entries(controls)) {
   control.addEventListener("input", () => {
+    displayPresetControl.value = "presentation";
+    setDisplayPreset("presentation");
     const value = key === "environment" ? control.value : Number(control.value);
     applyLighting({ [key]: value });
     status.textContent = "Unsaved changes";
     status.dataset.state = "";
   });
 }
+
+displayPresetControl.addEventListener("input", () => {
+  setDisplayPreset(displayPresetControl.value);
+  status.textContent = displayPresetControl.value === "faithful"
+    ? "Neutral fidelity preview — lighting values remain saved"
+    : "Using saved presentation lighting";
+  status.dataset.state = "";
+});
+
+qualityModeControl.addEventListener("input", () => {
+  setQualityMode(qualityModeControl.value);
+});
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function updateQualityDebug(nextState = getViewerQualityState()) {
+  const render = nextState.renderScale;
+  const timings = nextState.timings || {};
+  qualityModeControl.value = nextState.mode;
+  displayPresetControl.value = nextState.displayPreset;
+  qualityDebug.selected.textContent = `${nextState.mode} → ${nextState.selectedProfile}`;
+  qualityDebug.dpr.textContent = render
+    ? `${Number(render.reportedDpr).toFixed(2)} → ${Number(render.renderedDpr).toFixed(2)}`
+    : `${Number(nextState.device?.dpr || 1).toFixed(2)} / waiting`;
+  qualityDebug.render.textContent = render?.pixelWidth && render?.pixelHeight
+    ? `${render.pixelWidth}×${render.pixelHeight}`
+    : "waiting";
+  qualityDebug.drawCalls.textContent = nextState.model?.drawCalls
+    ? Number(nextState.model.drawCalls).toLocaleString()
+    : "metadata pending";
+  qualityDebug.triangles.textContent = nextState.model?.renderedTriangles
+    ? Number(nextState.model.renderedTriangles).toLocaleString()
+    : "metadata pending";
+  qualityDebug.textureGPU.textContent = formatBytes(nextState.model?.estimatedTextureGPUBytes);
+  qualityDebug.timing.textContent = timings.modelLoadedMs
+    ? `${timings.modelLoadedMs} / ${timings.firstUsableFrameMs ?? "…"} ms`
+    : "loading";
+  qualityDebug.cameraEvents.textContent = `${timings.cameraEventFps || 0} Hz · idle ${timings.idleCameraEvents ?? "…"}`;
+}
+
+window.addEventListener("viewer-quality-change", (event) => updateQualityDebug(event.detail));
 
 studio.querySelector('[data-action="reset"]').addEventListener("click", () => {
   applyLighting(DEFAULTS);
@@ -152,6 +241,7 @@ try {
   syncControls();
   await customElements.whenDefined("model-viewer");
   applyLighting(config, { preserveView: false });
+  updateQualityDebug();
 } catch (error) {
   syncControls();
   status.textContent = `Using defaults: ${error.message}`;

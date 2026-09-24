@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
+import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256File } from "./glb-utils.mjs";
@@ -28,6 +29,7 @@ const VISUAL_FILES = [
   "styles.css",
   "app.js",
   "instancing-camera.js",
+  "viewer-quality.js",
   "sketch.css",
   "sketch-controller.js",
   "sketch-spatial-model.js",
@@ -42,6 +44,7 @@ const PUBLIC_ROOT_FILES = new Set([
   "styles.css",
   "app.js",
   "instancing-camera.js",
+  "viewer-quality.js",
   "sketch.css",
   "sketch-controller.js",
   "sketch-spatial-model.js",
@@ -105,8 +108,8 @@ export async function validatePublishedArtifact({
   } catch (error) {
     throw new Error(`Published metadata is missing or invalid: ${error.message}`);
   }
-  if (metadata.schemaVersion !== 1 || metadata.validation?.passed !== true) {
-    throw new Error("Published metadata does not contain a successful schemaVersion 1 validation result.");
+  if (![1, 2].includes(metadata.schemaVersion) || metadata.validation?.passed !== true) {
+    throw new Error("Published metadata does not contain a successful supported validation result.");
   }
   const modelHash = await sha256File(modelPath);
   const modelStats = await stat(modelPath);
@@ -124,6 +127,14 @@ export async function validateProductionViewer(root = PROJECT_ROOT) {
   }
   if (/lightingStudio|data-preview-only/i.test(html)) {
     throw new Error("Production index.html must not contain Preview Lighting Studio markup.");
+  }
+  for (const controlId of ["twoDButton", "isoButton", "perspectiveButton"]) {
+    if (!new RegExp(`id=["']${controlId}["']`).test(html)) {
+      throw new Error(`Production viewer is missing the ${controlId} view control.`);
+    }
+  }
+  if (/twoPointButton|threePointButton|\b2P\b|\b3P\b/.test(html)) {
+    throw new Error("Production viewer still contains the retired 2P / 3P controls.");
   }
 }
 
@@ -277,13 +288,13 @@ export function closeServer(server) {
   return new Promise((resolve) => server.close(resolve));
 }
 
-function openBrowser(url, noOpen) {
-  if (noOpen) return;
+async function openBrowser(url, noOpen) {
+  if (noOpen) return false;
   let command;
   let args;
   if (process.platform === "win32") {
-    command = "cmd";
-    args = ["/c", "start", "", url];
+    command = "rundll32.exe";
+    args = ["url.dll,FileProtocolHandler", url];
   } else if (process.platform === "darwin") {
     command = "open";
     args = [url];
@@ -291,13 +302,21 @@ function openBrowser(url, noOpen) {
     command = "xdg-open";
     args = [url];
   }
-  try {
-    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
-    child.on("error", () => console.info(`Open this URL manually: ${url}`));
-    child.unref();
-  } catch {
-    console.info(`Open this URL manually: ${url}`);
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: "ignore", windowsHide: true });
+    child.once("error", () => resolve(false));
+    child.once("exit", (code) => resolve(code === 0));
+  });
+}
+
+function lanIPv4Addresses() {
+  const addresses = [];
+  for (const interfaces of Object.values(networkInterfaces())) {
+    for (const item of interfaces ?? []) {
+      if (item.family === "IPv4" && !item.internal) addresses.push(item.address);
+    }
   }
+  return [...new Set(addresses)].sort();
 }
 
 function isWatchedFile(filename) {
@@ -309,6 +328,7 @@ function isWatchedFile(filename) {
 export async function startPreview({
   root = PROJECT_ROOT,
   port = Number(process.env.PREVIEW_PORT || 8000),
+  host = "127.0.0.1",
   noOpen = false,
 } = {}) {
   await validatePublishedArtifact({ root });
@@ -333,11 +353,26 @@ export async function startPreview({
       }
     },
   });
-  await listen(server, port);
+  await listen(server, port, host);
   const url = `http://localhost:${port}/?model=./dist/current/model.glb`;
-  console.info(`\nPreview URL: ${url}`);
+  console.info(`\nLocal: ${url}`);
+  if (host === "0.0.0.0") {
+    const addresses = lanIPv4Addresses();
+    if (addresses.length) {
+      for (const address of addresses) {
+        console.info(`LAN:   http://${address}:${port}/?model=./dist/current/model.glb`);
+      }
+    } else {
+      console.info(`LAN:   http://<LAPTOP-LAN-IP>:${port}/?model=./dist/current/model.glb`);
+    }
+  }
   console.info("Serving dist/current. Press Ctrl+C to stop.");
-  openBrowser(url, noOpen);
+  const browserOpened = await openBrowser(url, noOpen);
+  if (!noOpen) {
+    console.info(browserOpened
+      ? "Browser open request completed."
+      : `Browser could not be opened automatically. Open this URL manually: ${url}`);
+  }
 
   let timer;
   let checking = false;
@@ -387,7 +422,15 @@ export async function startPreview({
 const isCLI = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCLI) {
   try {
-    await startPreview({ noOpen: process.argv.includes("--no-open") });
+    const hostFlagIndex = process.argv.indexOf("--host");
+    const inlineHost = process.argv.find((argument) => argument.startsWith("--host="))?.slice(7);
+    const host = inlineHost
+      || (hostFlagIndex >= 0 ? process.argv[hostFlagIndex + 1] : null)
+      || (process.argv.includes("--lan") ? "0.0.0.0" : "127.0.0.1");
+    if (host !== "127.0.0.1" && host !== "0.0.0.0") {
+      throw new Error("Preview host must be 127.0.0.1 or 0.0.0.0.");
+    }
+    await startPreview({ host, noOpen: process.argv.includes("--no-open") });
   } catch (error) {
     console.error(`\nPREVIEW STOPPED\n${error.message}`);
     process.exitCode = 1;

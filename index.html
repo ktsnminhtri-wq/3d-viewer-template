@@ -15,7 +15,7 @@
       type="module"
       src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"
     ></script>
-    <script src="./app.js" defer></script>
+    <script type="module" src="./app.js"></script>
     <script src="./instancing-camera.js" defer></script>
     <script type="module" src="./sketch-controller.js?v=sprint07"></script>
   </head>
@@ -26,19 +26,26 @@
         data-default-model="./model.glb"
         alt="Mô hình 3D tương tác"
         camera-controls
+        enable-pan
         touch-action="none"
         camera-orbit="0deg 75deg auto"
         camera-target="auto auto auto"
         field-of-view="30deg"
-        min-camera-orbit="auto auto 5%"
+        min-field-of-view="0.5deg"
+        max-field-of-view="45deg"
+        min-camera-orbit="auto auto 1%"
         max-camera-orbit="auto auto 500%"
+        orbit-sensitivity="0.72"
+        zoom-sensitivity="0.55"
+        pan-sensitivity="0.8"
+        interpolation-decay="75"
         interaction-prompt="none"
         environment-image="neutral"
-        tone-mapping="agx"
-        shadow-intensity="0.33"
+        tone-mapping="neutral"
+        shadow-intensity="0.8"
         shadow-softness="1.07"
-        exposure="1.83"
-        data-lighting-preset="soft"
+        exposure="1.45"
+        data-lighting-preset="neutral"
         orientation="0deg 0deg 0deg"
       >
         <div class="loading-panel" id="loadingPanel" slot="poster" aria-live="polite">
@@ -70,19 +77,28 @@
 
       <div class="bottom-ui">
         <div class="controls" aria-label="Điều khiển mô hình">
-          <div class="perspective-toggle" role="group" aria-label="Chế độ phối cảnh">
+          <div class="view-mode-toggle" role="group" aria-label="Chế độ hiển thị">
             <button
-              id="twoPointButton"
+              id="twoDButton"
               type="button"
               aria-pressed="false"
-              title="Phối cảnh kiến trúc hai điểm tụ"
-            >2P</button>
+              data-view-mode="2d"
+              title="Mặt đứng gần trực giao"
+            >2D</button>
             <button
-              id="threePointButton"
+              id="isoButton"
+              type="button"
+              aria-pressed="false"
+              data-view-mode="iso"
+              title="Trục đo isometric"
+            >ISO</button>
+            <button
+              id="perspectiveButton"
               type="button"
               aria-pressed="true"
-              title="Phối cảnh ba điểm tụ tự do"
-            >3P</button>
+              data-view-mode="perspective"
+              title="Phối cảnh tự do"
+            ><span class="view-mode-label-full">Perspective</span><span class="view-mode-label-short">Persp.</span></button>
           </div>
           <button id="resetButton" type="button" title="Đặt lại góc nhìn">
             <span class="button-icon" aria-hidden="true">↺</span>
