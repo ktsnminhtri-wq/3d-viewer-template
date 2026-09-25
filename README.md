@@ -197,13 +197,13 @@ Spatial sketch reference dùng URL model đã resolve làm identity thay vì gi�
 
 ## Chế độ nhìn kiến trúc
 
-Thanh công cụ có ba chế độ tập trung vào thao tác kiến trúc:
+Thanh công cụ có hai lựa chọn chính và một trạng thái theo bề mặt:
 
-- `Perspective`: phối cảnh tự do, orbit, pan, zoom và double-click/double-tap focus như viewer hiện tại.
-- `ISO`: góc isometric chuẩn 45°/35,264°, khóa hướng nhìn; kéo một ngón/chuột để pan và pinch/wheel để zoom. Nhấn ISO lần nữa để phục hồi góc canonical.
-- `2D`: mặt đứng gần trực giao theo hướng ngang hiện tại, khóa orbit; kéo để pan và pinch/wheel để zoom.
+- `Perspective`: phối cảnh thật với orbit, pan và zoom tự do. FOV mặc định là 35°; popover nhỏ cung cấp preset 35°/50°/70° và slider 20°–90°. Khi đổi FOV, camera radius được bù để giữ target và tỷ lệ hình gần như cũ.
+- `ISO`: snap về góc isometric chuẩn 45°/35,264° với FOV gần trực giao 1°. Orbit không bị khóa; sau khi điều hướng, nhấn ISO lần nữa để quay lại góc canonical.
+- `Face`: double-click hoặc double-tap một mặt để lấy hit point và surface normal, đặt hit point làm target rồi căn camera vuông góc với mặt. Kéo orbit sẽ thoát Face về Perspective; pan và pinch/wheel zoom vẫn hoạt động.
 
-`<model-viewer>` 4.0 không cung cấp public API để thay camera renderer thành `OrthographicCamera`. Vì vậy 2D và ISO dùng phép chiếu near-orthographic với FOV 1° và tự bù camera radius để giữ framing. Cách này giữ sketch overlay đồng bộ qua public camera API, nhưng vẫn còn một lượng perspective convergence rất nhỏ. Trạng thái nội bộ có thể kiểm tra bằng `window.__viewerViewMode.getState()`.
+Double-click/double-tap được dành cho Face View thay vì focus đơn thuần. S Pen vẫn ưu tiên sketch và không kích hoạt Face View. `<model-viewer>` 4.0 không cung cấp public API để thay camera renderer thành `OrthographicCamera`, nên ISO và Face dùng near-orthographic FOV 1°; Perspective luôn dùng FOV thật. Trạng thái có thể kiểm tra bằng `window.__viewerViewMode.getState()`.
 
 ## Profile tối ưu viewer-safe
 
@@ -303,7 +303,7 @@ npm run publish -- "D:\Models\tower.glb"
 npm run preview
 ```
 
-Kiểm tra `dist/current/metadata.json`, mở URL preview được in ra, thử pan/zoom/orbit trong các chế độ 2D, ISO, Perspective, material, transparency và spatial sketch. Source `D:\Models\tower.glb` phải giữ nguyên SHA, tên và vị trí.
+Kiểm tra `dist/current/metadata.json`, mở URL preview được in ra, thử Perspective với các FOV, ISO snap/orbit, Face View trên facade và roof, material, transparency và spatial sketch. Source `D:\Models\tower.glb` phải giữ nguyên SHA, tên và vị trí.
 
 ## Giới hạn đã biết
 

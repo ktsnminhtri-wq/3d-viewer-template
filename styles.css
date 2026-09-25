@@ -209,6 +209,103 @@ model-viewer:focus-visible {
   display: none;
 }
 
+.view-mode-indicator {
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #292b29;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 38px;
+}
+
+.fov-control {
+  position: relative;
+  display: flex;
+}
+
+.fov-control[hidden],
+.fov-panel[hidden],
+.view-mode-indicator[hidden] {
+  display: none;
+}
+
+.controls .fov-button {
+  min-width: 76px;
+  padding-inline: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fov-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  width: min(270px, calc(100vw - 24px));
+  padding: 13px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 14px;
+  background: rgb(248 248 246 / 96%);
+  box-shadow: 0 14px 38px rgb(31 32 31 / 18%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.fov-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #383a38;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.fov-panel__header output {
+  color: #686a67;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fov-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.controls .fov-panel .fov-presets button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 9px;
+  font-size: 0.75rem;
+}
+
+.controls .fov-panel .fov-presets button[aria-pressed="true"] {
+  border-color: #292b29;
+  background: #292b29;
+  color: #fff;
+}
+
+.fov-slider-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  color: #777976;
+  font-size: 0.67rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fov-slider-row input {
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  accent-color: #292b29;
+  touch-action: pan-x;
+}
+
 .controls button {
   display: inline-flex;
   align-items: center;
@@ -293,6 +390,18 @@ model-viewer:focus-visible {
     flex: none;
     min-width: 34px;
     padding: 0 7px;
+  }
+
+  .view-mode-indicator {
+    min-height: 38px;
+    padding: 0 8px;
+    line-height: 38px;
+  }
+
+  .controls .fov-button {
+    flex: none;
+    min-width: 67px;
+    padding-inline: 7px;
   }
 
   .view-mode-label-full {

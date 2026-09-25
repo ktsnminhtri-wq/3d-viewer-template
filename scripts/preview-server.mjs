@@ -128,13 +128,13 @@ export async function validateProductionViewer(root = PROJECT_ROOT) {
   if (/lightingStudio|data-preview-only/i.test(html)) {
     throw new Error("Production index.html must not contain Preview Lighting Studio markup.");
   }
-  for (const controlId of ["twoDButton", "isoButton", "perspectiveButton"]) {
+  for (const controlId of ["isoButton", "perspectiveButton", "fovButton", "faceViewIndicator"]) {
     if (!new RegExp(`id=["']${controlId}["']`).test(html)) {
       throw new Error(`Production viewer is missing the ${controlId} view control.`);
     }
   }
-  if (/twoPointButton|threePointButton|\b2P\b|\b3P\b/.test(html)) {
-    throw new Error("Production viewer still contains the retired 2P / 3P controls.");
+  if (/twoDButton|twoPointButton|threePointButton|>\s*(?:2D|2P|3P)\s*</.test(html)) {
+    throw new Error("Production viewer still contains a retired 2D / 2P / 3P control.");
   }
 }
 

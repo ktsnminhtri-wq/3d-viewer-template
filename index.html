@@ -30,9 +30,9 @@
         touch-action="none"
         camera-orbit="0deg 75deg auto"
         camera-target="auto auto auto"
-        field-of-view="30deg"
+        field-of-view="35deg"
         min-field-of-view="0.5deg"
-        max-field-of-view="45deg"
+        max-field-of-view="90deg"
         min-camera-orbit="auto auto 1%"
         max-camera-orbit="auto auto 500%"
         orbit-sensitivity="0.72"
@@ -79,13 +79,6 @@
         <div class="controls" aria-label="Điều khiển mô hình">
           <div class="view-mode-toggle" role="group" aria-label="Chế độ hiển thị">
             <button
-              id="twoDButton"
-              type="button"
-              aria-pressed="false"
-              data-view-mode="2d"
-              title="Mặt đứng gần trực giao"
-            >2D</button>
-            <button
               id="isoButton"
               type="button"
               aria-pressed="false"
@@ -99,6 +92,33 @@
               data-view-mode="perspective"
               title="Phối cảnh tự do"
             ><span class="view-mode-label-full">Perspective</span><span class="view-mode-label-short">Persp.</span></button>
+            <span class="view-mode-indicator" id="faceViewIndicator" role="status" hidden>Face</span>
+          </div>
+          <div class="fov-control" id="fovControl">
+            <button
+              class="fov-button"
+              id="fovButton"
+              type="button"
+              aria-expanded="false"
+              aria-controls="fovPanel"
+              title="Điều chỉnh trường nhìn phối cảnh"
+            ><span aria-hidden="true">FOV</span><span id="fovButtonValue">35°</span></button>
+            <section class="fov-panel" id="fovPanel" aria-label="Trường nhìn phối cảnh" hidden>
+              <div class="fov-panel__header">
+                <span>Field of View</span>
+                <output id="fovValue" for="fovSlider">35°</output>
+              </div>
+              <div class="fov-presets" aria-label="FOV đặt sẵn">
+                <button type="button" data-fov="35" aria-pressed="true">35°</button>
+                <button type="button" data-fov="50" aria-pressed="false">50°</button>
+                <button type="button" data-fov="70" aria-pressed="false">70°</button>
+              </div>
+              <label class="fov-slider-row" for="fovSlider">
+                <span>20°</span>
+                <input id="fovSlider" type="range" min="20" max="90" step="1" value="35">
+                <span>90°</span>
+              </label>
+            </section>
           </div>
           <button id="resetButton" type="button" title="Đặt lại góc nhìn">
             <span class="button-icon" aria-hidden="true">↺</span>

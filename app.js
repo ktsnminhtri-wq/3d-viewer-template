@@ -13,10 +13,17 @@ const rotateLabel = document.querySelector("#rotateLabel");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenLabel = document.querySelector("#fullscreenLabel");
 const retryButton = document.querySelector("#retryButton");
-const twoDButton = document.querySelector("#twoDButton");
 const isoButton = document.querySelector("#isoButton");
 const perspectiveButton = document.querySelector("#perspectiveButton");
 const viewModeButtons = [...document.querySelectorAll("[data-view-mode]")];
+const faceViewIndicator = document.querySelector("#faceViewIndicator");
+const fovControl = document.querySelector("#fovControl");
+const fovButton = document.querySelector("#fovButton");
+const fovButtonValue = document.querySelector("#fovButtonValue");
+const fovPanel = document.querySelector("#fovPanel");
+const fovValue = document.querySelector("#fovValue");
+const fovSlider = document.querySelector("#fovSlider");
+const fovPresetButtons = [...document.querySelectorAll("[data-fov]")];
 const interactionHint = document.querySelector(".hint");
 const modelPathHint = document.querySelector("#modelPathHint");
 let resolvedModelURL = null;
@@ -26,7 +33,10 @@ let lastTouchTap = null;
 const touchStarts = new Map();
 const navigationPointers = new Set();
 const penPointers = new Set();
-let fixedPanGesture = null;
+let faceExitGesture = null;
+let lastPenInteractionAt = 0;
+let lastFaceGestureAt = 0;
+let suppressCompatibilityMouseUntil = 0;
 
 function resolveModelSource() {
   const fallback = modelViewer.dataset.defaultModel || "./model.glb";
@@ -59,18 +69,20 @@ let defaultTarget = "auto auto auto";
 const defaultMinOrbit = modelViewer.getAttribute("min-camera-orbit") || "auto auto auto";
 const defaultMaxOrbit = modelViewer.getAttribute("max-camera-orbit") || "auto auto auto";
 const VIEW_MODES = Object.freeze({
-  TWO_D: "2d",
   ISO: "iso",
+  FACE: "face",
   PERSPECTIVE: "perspective",
 });
-const PERSPECTIVE_FOV_DEG = 30;
+const DEFAULT_PERSPECTIVE_FOV_DEG = 35;
+const MIN_PERSPECTIVE_FOV_DEG = 20;
+const MAX_PERSPECTIVE_FOV_DEG = 90;
 const NEAR_ORTHOGRAPHIC_FOV_DEG = 1;
 const ISO_THETA_RAD = Math.PI / 4;
 const ISO_PHI_RAD = Math.acos(1 / Math.sqrt(3));
-const LEVEL_PHI_RAD = Math.PI / 2;
+const FACE_POLE_EPSILON_RAD = Math.PI / 720;
 let viewMode = VIEW_MODES.PERSPECTIVE;
-let perspectiveFieldOfView = PERSPECTIVE_FOV_DEG;
-let lockedOrbit = null;
+let perspectiveFieldOfView = DEFAULT_PERSPECTIVE_FOV_DEG;
+let faceView = null;
 let userNavigationStarted = false;
 let modelLoaded = false;
 
@@ -110,15 +122,6 @@ function updateAdaptiveZoomSensitivity() {
   modelViewer.dataset.zoomSensitivityBand = band;
 }
 
-function focusCameraAt(clientX, clientY) {
-  const hit = modelViewer.positionAndNormalFromPoint?.(clientX, clientY);
-  if (!hit?.position) return false;
-  const { x, y, z } = hit.position;
-  if (![x, y, z].every(Number.isFinite)) return false;
-  modelViewer.cameraTarget = `${x}m ${y}m ${z}m`;
-  return true;
-}
-
 function radians(value) {
   return value * Math.PI / 180;
 }
@@ -131,7 +134,7 @@ function framedRadius(radius, fromFovDegrees, toFovDegrees) {
   return radius * fromTangent / toTangent;
 }
 
-function stopAutoRotateForLockedView() {
+function stopAutoRotateForCameraPreset() {
   if (!modelViewer.hasAttribute("auto-rotate")) return;
   modelViewer.removeAttribute("auto-rotate");
   rotateButton.setAttribute("aria-pressed", "false");
@@ -144,10 +147,29 @@ function updateViewModeUI() {
     button.setAttribute("aria-pressed", String(button.dataset.viewMode === viewMode));
   }
   modelViewer.dataset.viewMode = viewMode;
-  const fixedView = viewMode !== VIEW_MODES.PERSPECTIVE;
-  interactionHint.textContent = fixedView
-    ? "Kéo để di chuyển · Cuộn hoặc chụm để zoom"
-    : "Kéo để xoay · Cuộn hoặc chụm để zoom";
+  faceViewIndicator.hidden = viewMode !== VIEW_MODES.FACE;
+  fovControl.hidden = viewMode !== VIEW_MODES.PERSPECTIVE;
+  if (viewMode !== VIEW_MODES.PERSPECTIVE) closeFovPanel();
+  interactionHint.textContent = viewMode === VIEW_MODES.FACE
+    ? "Kéo để thoát Face · Chụm để zoom"
+    : viewMode === VIEW_MODES.ISO
+      ? "Kéo để xoay · Nhấn ISO để đặt lại góc"
+      : "Kéo để xoay · Nhấn đúp mặt để nhìn thẳng";
+}
+
+function closeFovPanel() {
+  fovPanel.hidden = true;
+  fovButton.setAttribute("aria-expanded", "false");
+}
+
+function updateFovUI() {
+  const rounded = Math.round(perspectiveFieldOfView);
+  fovSlider.value = String(rounded);
+  fovValue.value = `${rounded}°`;
+  fovButtonValue.textContent = `${rounded}°`;
+  for (const button of fovPresetButtons) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.fov) === rounded));
+  }
 }
 
 function applyPerspectiveOrbitBounds() {
@@ -161,13 +183,11 @@ function applyPerspectiveOrbitBounds() {
   modelViewer.maxCameraOrbit = defaultMaxOrbit;
 }
 
-function applyLockedOrbit(theta, phi, radius) {
-  lockedOrbit = { theta, phi };
+function applyNearOrthographicBounds(radius) {
   const minimumRadius = Math.max(radius * 0.001, 0.000001);
   const maximumRadius = Math.max(radius * 100, minimumRadius * 10);
-  modelViewer.minCameraOrbit = `${theta}rad ${phi}rad ${minimumRadius}m`;
-  modelViewer.maxCameraOrbit = `${theta}rad ${phi}rad ${maximumRadius}m`;
-  modelViewer.cameraOrbit = `${theta}rad ${phi}rad ${radius}m`;
+  modelViewer.minCameraOrbit = `auto auto ${minimumRadius}m`;
+  modelViewer.maxCameraOrbit = `auto auto ${maximumRadius}m`;
 }
 
 function setViewMode(mode, { restoreCanonical = false } = {}) {
@@ -178,6 +198,7 @@ function setViewMode(mode, { restoreCanonical = false } = {}) {
     return false;
   }
 
+  if (mode === VIEW_MODES.FACE) return false;
   if (mode === viewMode && !(restoreCanonical && mode === VIEW_MODES.ISO)) return true;
 
   const previousMode = viewMode;
@@ -195,20 +216,19 @@ function setViewMode(mode, { restoreCanonical = false } = {}) {
 
   viewMode = mode;
   modelViewer.minFieldOfView = "0.5deg";
-  modelViewer.maxFieldOfView = "45deg";
+  modelViewer.maxFieldOfView = `${MAX_PERSPECTIVE_FOV_DEG}deg`;
   modelViewer.fieldOfView = `${targetFieldOfView}deg`;
 
   if (mode === VIEW_MODES.PERSPECTIVE) {
-    lockedOrbit = null;
+    faceView = null;
     applyPerspectiveOrbitBounds();
     modelViewer.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${targetRadius}m`;
-  } else if (mode === VIEW_MODES.ISO) {
-    stopAutoRotateForLockedView();
-    modelViewer.resetTurntableRotation?.(0);
-    applyLockedOrbit(ISO_THETA_RAD, ISO_PHI_RAD, targetRadius);
   } else {
-    stopAutoRotateForLockedView();
-    applyLockedOrbit(orbit.theta, LEVEL_PHI_RAD, targetRadius);
+    faceView = null;
+    stopAutoRotateForCameraPreset();
+    modelViewer.resetTurntableRotation?.(0);
+    applyNearOrthographicBounds(targetRadius);
+    modelViewer.cameraOrbit = `${ISO_THETA_RAD}rad ${ISO_PHI_RAD}rad ${targetRadius}m`;
   }
 
   updateViewModeUI();
@@ -218,46 +238,106 @@ function setViewMode(mode, { restoreCanonical = false } = {}) {
   return true;
 }
 
-function panFixedView(deltaX, deltaY) {
-  if (viewMode === VIEW_MODES.PERSPECTIVE) return false;
+function setPerspectiveFov(value) {
+  const nextFov = Math.min(
+    MAX_PERSPECTIVE_FOV_DEG,
+    Math.max(MIN_PERSPECTIVE_FOV_DEG, Number(value)),
+  );
+  if (!Number.isFinite(nextFov)) return false;
+  const previousFov = perspectiveFieldOfView;
+  perspectiveFieldOfView = nextFov;
+  updateFovUI();
+  if (viewMode !== VIEW_MODES.PERSPECTIVE) return true;
+
+  const orbit = modelViewer.getCameraOrbit?.();
+  const currentFov = Number(modelViewer.getFieldOfView?.());
+  if (!orbit || !Number.isFinite(orbit.radius) || !Number.isFinite(currentFov)) return false;
+  const targetRadius = framedRadius(orbit.radius, currentFov || previousFov, nextFov);
+  modelViewer.fieldOfView = `${nextFov}deg`;
+  modelViewer.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${targetRadius}m`;
+  return true;
+}
+
+function orbitDirection(orbit) {
+  const sinPhi = Math.sin(orbit.phi);
+  return {
+    x: sinPhi * Math.sin(orbit.theta),
+    y: Math.cos(orbit.phi),
+    z: sinPhi * Math.cos(orbit.theta),
+  };
+}
+
+function cameraSnapshot() {
   const orbit = modelViewer.getCameraOrbit?.();
   const target = modelViewer.getCameraTarget?.();
   const fieldOfView = Number(modelViewer.getFieldOfView?.());
-  const rect = modelViewer.getBoundingClientRect();
-  if (!orbit || !target || !Number.isFinite(fieldOfView) || rect.height <= 0) return false;
+  if (!orbit || !target || !Number.isFinite(fieldOfView)) return null;
+  const values = [orbit.theta, orbit.phi, orbit.radius, target.x, target.y, target.z];
+  if (!values.every(Number.isFinite)) return null;
+  return {
+    mode: viewMode,
+    orbit: { theta: orbit.theta, phi: orbit.phi, radius: orbit.radius },
+    target: { x: target.x, y: target.y, z: target.z },
+    fieldOfView,
+  };
+}
 
-  const theta = lockedOrbit?.theta ?? orbit.theta;
-  const phi = lockedOrbit?.phi ?? orbit.phi;
-  const sinPhi = Math.sin(phi);
-  const cameraDirection = {
-    x: sinPhi * Math.sin(theta),
-    y: Math.cos(phi),
-    z: sinPhi * Math.cos(theta),
-  };
-  const forward = {
-    x: -cameraDirection.x,
-    y: -cameraDirection.y,
-    z: -cameraDirection.z,
-  };
-  let right = { x: -forward.z, y: 0, z: forward.x };
-  const rightLength = Math.hypot(right.x, right.y, right.z) || 1;
-  right = {
-    x: right.x / rightLength,
-    y: 0,
-    z: right.z / rightLength,
-  };
-  const screenUp = {
-    x: right.y * forward.z - right.z * forward.y,
-    y: right.z * forward.x - right.x * forward.z,
-    z: right.x * forward.y - right.y * forward.x,
-  };
-  const unitsPerPixel = 2 * orbit.radius * Math.tan(radians(fieldOfView) / 2) / rect.height;
-  const x = target.x - right.x * deltaX * unitsPerPixel + screenUp.x * deltaY * unitsPerPixel;
-  const y = target.y - right.y * deltaX * unitsPerPixel + screenUp.y * deltaY * unitsPerPixel;
-  const z = target.z - right.z * deltaX * unitsPerPixel + screenUp.z * deltaY * unitsPerPixel;
-  if (![x, y, z].every(Number.isFinite)) return false;
-  modelViewer.cameraTarget = `${x}m ${y}m ${z}m`;
-  modelViewer.jumpCameraToGoal?.();
+function enterFaceView(clientX, clientY) {
+  const hit = modelViewer.positionAndNormalFromPoint?.(clientX, clientY);
+  const snapshot = cameraSnapshot();
+  if (!hit?.position || !hit?.normal || !snapshot) return false;
+  const target = { x: hit.position.x, y: hit.position.y, z: hit.position.z };
+  const normal = { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z };
+  if (![target.x, target.y, target.z, normal.x, normal.y, normal.z].every(Number.isFinite)) {
+    return false;
+  }
+  const normalLength = Math.hypot(normal.x, normal.y, normal.z);
+  if (normalLength <= 1e-8) return false;
+  normal.x /= normalLength;
+  normal.y /= normalLength;
+  normal.z /= normalLength;
+
+  const currentDirection = orbitDirection(snapshot.orbit);
+  if (
+    normal.x * currentDirection.x
+    + normal.y * currentDirection.y
+    + normal.z * currentDirection.z < 0
+  ) {
+    normal.x *= -1;
+    normal.y *= -1;
+    normal.z *= -1;
+  }
+
+  const nearPole = Math.abs(normal.y) > 0.985;
+  const theta = nearPole ? snapshot.orbit.theta : Math.atan2(normal.x, normal.z);
+  const rawPhi = Math.acos(Math.min(1, Math.max(-1, normal.y)));
+  const phi = Math.min(
+    Math.PI - FACE_POLE_EPSILON_RAD,
+    Math.max(FACE_POLE_EPSILON_RAD, rawPhi),
+  );
+  const targetRadius = framedRadius(
+    snapshot.orbit.radius,
+    snapshot.fieldOfView,
+    NEAR_ORTHOGRAPHIC_FOV_DEG,
+  );
+  const previousCameraState = viewMode === VIEW_MODES.FACE
+    ? faceView?.previousCameraState ?? snapshot
+    : snapshot;
+  const previousMode = viewMode;
+
+  stopAutoRotateForCameraPreset();
+  viewMode = VIEW_MODES.FACE;
+  faceView = { target, normal, previousCameraState };
+  modelViewer.minFieldOfView = "0.5deg";
+  modelViewer.maxFieldOfView = `${MAX_PERSPECTIVE_FOV_DEG}deg`;
+  modelViewer.fieldOfView = `${NEAR_ORTHOGRAPHIC_FOV_DEG}deg`;
+  applyNearOrthographicBounds(targetRadius);
+  modelViewer.cameraTarget = `${target.x}m ${target.y}m ${target.z}m`;
+  modelViewer.cameraOrbit = `${theta}rad ${phi}rad ${targetRadius}m`;
+  updateViewModeUI();
+  window.dispatchEvent(new CustomEvent("viewer-view-mode-change", {
+    detail: { viewMode, previousMode },
+  }));
   return true;
 }
 
@@ -276,13 +356,14 @@ modelViewer.addEventListener("load", () => {
   // Các giá trị "auto" để model-viewer tự tính tâm và khoảng cách theo kích thước model.
   modelViewer.cameraTarget = defaultTarget;
   modelViewer.cameraOrbit = defaultOrbit;
-  modelViewer.fieldOfView = `${PERSPECTIVE_FOV_DEG}deg`;
+  modelViewer.fieldOfView = `${DEFAULT_PERSPECTIVE_FOV_DEG}deg`;
   modelViewer.jumpCameraToGoal();
   const dimensions = modelViewer.getDimensions?.();
   if (dimensions) {
     const diagonal = Math.hypot(dimensions.x, dimensions.y, dimensions.z);
     if (Number.isFinite(diagonal) && diagonal > 0) modelDiagonal = diagonal;
   }
+  updateFovUI();
   updateViewModeUI();
   updateAdaptiveZoomSensitivity();
 });
@@ -290,27 +371,37 @@ modelViewer.addEventListener("load", () => {
 modelViewer.addEventListener("camera-change", updateAdaptiveZoomSensitivity);
 
 modelViewer.addEventListener("dblclick", (event) => {
-  if (viewMode !== VIEW_MODES.PERSPECTIVE) return;
-  if (focusCameraAt(event.clientX, event.clientY)) event.preventDefault();
+  const now = performance.now();
+  if (event.pointerType === "pen" || now - lastPenInteractionAt < 500) return;
+  if (now < suppressCompatibilityMouseUntil) return;
+  if (now - lastFaceGestureAt < 250) return;
+  if (enterFaceView(event.clientX, event.clientY)) {
+    lastFaceGestureAt = now;
+    event.preventDefault();
+  }
 });
 
 modelViewer.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "pen") {
     penPointers.add(event.pointerId);
+    lastPenInteractionAt = performance.now();
+    return;
+  }
+  if (event.pointerType === "mouse" && performance.now() < suppressCompatibilityMouseUntil) {
     return;
   }
   userNavigationStarted = true;
   navigationPointers.add(event.pointerId);
-  if (
-    viewMode !== VIEW_MODES.PERSPECTIVE
-    && event.isPrimary
-    && (event.pointerType === "touch" || event.button === 0)
-  ) {
-    fixedPanGesture = {
+  if (viewMode === VIEW_MODES.FACE && event.isPrimary) {
+    if (event.pointerType === "mouse" && event.button === 0) {
+      setViewMode(VIEW_MODES.PERSPECTIVE);
+    } else if (event.pointerType === "touch") {
+      faceExitGesture = {
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-    };
+      };
+    }
   }
   if (event.pointerType !== "touch") return;
   touchStarts.set(event.pointerId, {
@@ -318,24 +409,24 @@ modelViewer.addEventListener("pointerdown", (event) => {
     y: event.clientY,
     time: performance.now(),
   });
-});
+}, { capture: true });
 
 modelViewer.addEventListener("pointermove", (event) => {
   if (
-    !fixedPanGesture
-    || fixedPanGesture.pointerId !== event.pointerId
-    || viewMode === VIEW_MODES.PERSPECTIVE
+    viewMode !== VIEW_MODES.FACE
+    || !faceExitGesture
+    || faceExitGesture.pointerId !== event.pointerId
     || navigationPointers.size !== 1
     || penPointers.size > 0
   ) return;
-  if (event.pointerType === "mouse" && event.buttons !== 1) return;
-  const deltaX = event.clientX - fixedPanGesture.x;
-  const deltaY = event.clientY - fixedPanGesture.y;
-  fixedPanGesture.x = event.clientX;
-  fixedPanGesture.y = event.clientY;
-  if (!panFixedView(deltaX, deltaY)) return;
-  event.preventDefault();
-  event.stopPropagation();
+  const distance = Math.hypot(
+    event.clientX - faceExitGesture.x,
+    event.clientY - faceExitGesture.y,
+  );
+  if (distance > 8) {
+    faceExitGesture = null;
+    setViewMode(VIEW_MODES.PERSPECTIVE);
+  }
 }, { capture: true });
 
 modelViewer.addEventListener("wheel", () => {
@@ -345,10 +436,11 @@ modelViewer.addEventListener("wheel", () => {
 modelViewer.addEventListener("pointerup", (event) => {
   if (event.pointerType === "pen") {
     penPointers.delete(event.pointerId);
+    lastPenInteractionAt = performance.now();
     return;
   }
   navigationPointers.delete(event.pointerId);
-  if (fixedPanGesture?.pointerId === event.pointerId) fixedPanGesture = null;
+  if (faceExitGesture?.pointerId === event.pointerId) faceExitGesture = null;
   if (event.pointerType !== "touch") return;
   const start = touchStarts.get(event.pointerId);
   touchStarts.delete(event.pointerId);
@@ -360,18 +452,19 @@ modelViewer.addEventListener("pointerup", (event) => {
     && now - lastTouchTap.time <= 340
     && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) <= 28;
   lastTouchTap = { x: event.clientX, y: event.clientY, time: now };
-  if (isDoubleTap && viewMode === VIEW_MODES.PERSPECTIVE) {
-    focusCameraAt(event.clientX, event.clientY);
+  if (isDoubleTap && enterFaceView(event.clientX, event.clientY)) {
+    lastFaceGestureAt = now;
+    suppressCompatibilityMouseUntil = now + 800;
     lastTouchTap = null;
   }
-});
+}, { capture: true });
 
 modelViewer.addEventListener("pointercancel", (event) => {
   penPointers.delete(event.pointerId);
   navigationPointers.delete(event.pointerId);
-  if (fixedPanGesture?.pointerId === event.pointerId) fixedPanGesture = null;
+  if (faceExitGesture?.pointerId === event.pointerId) faceExitGesture = null;
   touchStarts.delete(event.pointerId);
-});
+}, { capture: true });
 
 modelViewer.addEventListener("error", () => {
   loadingPanel.hidden = true;
@@ -379,33 +472,48 @@ modelViewer.addEventListener("error", () => {
 });
 
 resetButton.addEventListener("click", () => {
-  const resetMode = viewMode;
   const framing = window.__instancingCamera?.getFraming?.();
+  closeFovPanel();
+  viewMode = VIEW_MODES.PERSPECTIVE;
+  faceView = null;
+  perspectiveFieldOfView = DEFAULT_PERSPECTIVE_FOV_DEG;
   modelViewer.cameraTarget = framing
     ? framing.center.map((value) => `${value}m`).join(" ")
     : defaultTarget;
   applyPerspectiveOrbitBounds();
-  modelViewer.fieldOfView = `${PERSPECTIVE_FOV_DEG}deg`;
+  modelViewer.fieldOfView = `${DEFAULT_PERSPECTIVE_FOV_DEG}deg`;
   modelViewer.cameraOrbit = framing
     ? `0deg 75deg ${framing.radius}m`
     : defaultOrbit;
   modelViewer.jumpCameraToGoal();
-  viewMode = VIEW_MODES.PERSPECTIVE;
-  perspectiveFieldOfView = PERSPECTIVE_FOV_DEG;
-  lockedOrbit = null;
-  if (resetMode !== VIEW_MODES.PERSPECTIVE) {
-    setViewMode(resetMode, { restoreCanonical: true });
-    modelViewer.jumpCameraToGoal();
-  } else {
-    updateViewModeUI();
-  }
+  updateFovUI();
+  updateViewModeUI();
 });
 
-twoDButton.addEventListener("click", () => setViewMode(VIEW_MODES.TWO_D));
 isoButton.addEventListener("click", () => setViewMode(VIEW_MODES.ISO, {
   restoreCanonical: viewMode === VIEW_MODES.ISO,
 }));
 perspectiveButton.addEventListener("click", () => setViewMode(VIEW_MODES.PERSPECTIVE));
+
+fovButton.addEventListener("click", () => {
+  const willOpen = fovPanel.hidden;
+  fovPanel.hidden = !willOpen;
+  fovButton.setAttribute("aria-expanded", String(willOpen));
+});
+
+for (const button of fovPresetButtons) {
+  button.addEventListener("click", () => setPerspectiveFov(button.dataset.fov));
+}
+
+fovSlider.addEventListener("input", () => setPerspectiveFov(fovSlider.value));
+
+document.addEventListener("pointerdown", (event) => {
+  if (!fovPanel.hidden && !fovControl.contains(event.target)) closeFovPanel();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeFovPanel();
+});
 
 rotateButton.addEventListener("click", () => {
   const isRotating = !modelViewer.hasAttribute("auto-rotate");
@@ -458,14 +566,21 @@ Object.defineProperty(window, "__viewerViewMode", {
         projection: viewMode === VIEW_MODES.PERSPECTIVE
           ? "perspective"
           : "near-orthographic",
-        isoLocked: viewMode === VIEW_MODES.ISO,
-        orbitLocked: viewMode !== VIEW_MODES.PERSPECTIVE,
+        perspectiveFov: perspectiveFieldOfView,
+        isoLocked: false,
+        orbitLocked: false,
         fieldOfView: Number(modelViewer.getFieldOfView?.()),
         orbit: orbit ? { theta: orbit.theta, phi: orbit.phi, radius: orbit.radius } : null,
         target: target ? { x: target.x, y: target.y, z: target.z } : null,
+        faceView: faceView ? {
+          target: { ...faceView.target },
+          normal: { ...faceView.normal },
+          previousCameraState: faceView.previousCameraState,
+        } : null,
       };
     },
   }),
 });
 
+updateFovUI();
 updateViewModeUI();
